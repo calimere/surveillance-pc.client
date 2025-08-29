@@ -35,10 +35,10 @@ def init_db():
             exe_blocked BOOLEAN NOT NULL DEFAULT 0
         )
     """)
+    
     cur.execute("""
         CREATE TABLE IF NOT EXISTS exe_event (
             eev_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            exe_id INTEGER NOT NULL,
             exe_id INTEGER NOT NULL,
             eev_type INTEGER NOT NULL,
             eev_timestamp TIMESTAMP NOT NULL,
@@ -56,6 +56,14 @@ def get_known_watched_processes():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute(REQUEST + " WHERE exe_is_watched=1 and exe_is_unknown=0")
+    rows = cur.fetchall()
+    conn.close()
+    return rows
+
+def get_known_blocked_processes():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute( REQUEST + " WHERE exe_blocked=1 and exe_is_unknown=0")
     rows = cur.fetchall()
     conn.close()
     return rows

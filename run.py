@@ -1,12 +1,12 @@
 import time
-from db import get_unknown_processes, get_watch_processes, init_db
+from db import get_known_blocked_processes, get_unknown_processes, get_known_watched_processes, init_db
 from running_processes import scan_running_processes
 from scan_exe import scan_exe
 
 print("Démarrage de la surveillance des exécutables...")
 init_db()
 
-avoid_scan = False
+avoid_scan = True
 avoid_windows_scan = True
 
 iterator = 0
@@ -17,11 +17,11 @@ while(True):
         iterator = 0
         scan_exe(avoid_scan_windows_folder=avoid_windows_scan)
 
-    watched_processes = get_watch_processes()
+    watched_processes = get_known_watched_processes()
     unknown_processes = get_unknown_processes()
-    scan_running_processes(watched_processes, unknown_processes)
+    blocked_processes = get_known_blocked_processes()
+    scan_running_processes(watched_processes, unknown_processes, blocked_processes)
 
     iterator += 1
     print(f"Prochaine analyse dans {300 - iterator} secondes...")
     time.sleep(1)
-

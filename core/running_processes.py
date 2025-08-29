@@ -4,7 +4,7 @@ import requests
 from db import add_event, add_or_update_unknown_executable, get_process_by_name, update_launched_status
 from notification import send_discord_notification
 
-def scan_running_processes(watched_processes,unknown_processes):
+def scan_running_processes(watched_processes,unknown_processes,blocked_processes):
     #Parcourt tous les processus actifs et met à jour la base.
     for proc in psutil.process_iter(['pid', 'name', 'exe']):
         try:
@@ -47,6 +47,18 @@ def scan_running_processes(watched_processes,unknown_processes):
                     send_discord_notification(msg)
                     update_launched_status(item[2], 1)
                     add_event(item[2], 1)
+
+                    if item[6]:
+                        try:
+                            p = psutil.Process(proc.info['pid'])
+                            p.terminate()  # ou p.kill()
+                            print(f"Processus bloqué {name} (PID: {proc.info['pid']}) a été arrêté.")
+                            send_discord_notification(f"Processus bloqué {name} (PID: {proc.info['pid']}) a été arrêté.")
+                            add_event(item[2], 2)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                            print(f"Impossible d'arrêter le processus {name} (PID: {proc.info['pid']}): {e}")
+                            send_discord_notification(f"Impossible d'arrêter le processus {name} (PID: {proc.info['pid']}): {e}")
+
                 else:
                     print(f"Processus surveillé déjà en cours d'exécution : {name} (PID: {proc.info['pid']})")
 
@@ -62,4 +74,19 @@ def scan_running_processes(watched_processes,unknown_processes):
             update_launched_status(item[2], 0)
             add_event(item[2], 0)
     
-    
+    for item in blocked_processes:
+        still_running = any(proc.info['name'] == item[0] for proc in psutil.process_iter(['name']))
+        if not still_running and item[3]:
+
+            try :
+                p = psutil.Process(proc.info['pid'])
+                p.terminate()  # ou p.kill()
+                msg = f"Processus bloqué arrêté : {item[0]}"
+                print(msg)
+                send_discord_notification(msg)
+                update_launched_status(item[2], 0)
+                add_event(item[2], 2)
+                add_event(item[2], 0)
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                print(f"Impossible d'arrêter le processus {name} (PID: {proc.info['pid']}): {e}")
+                send_discord_notification(f"Impossible d'arrêter le processus {name} (PID: {proc.info['pid']}): {e}")

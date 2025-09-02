@@ -1,10 +1,14 @@
+import configparser
 import os
 import sqlite3
 import datetime
 import psutil  # pip install psutil
 
+config = configparser.ConfigParser()
+config.read("config.ini")
+
 APP_DATA_DIR = os.path.join(os.getenv('APPDATA') or os.path.expanduser('~/.config'), 'surveillance-pc')
-DB_PATH = os.path.join(APP_DATA_DIR, "watch.db")
+DB_PATH = os.path.join(APP_DATA_DIR, config.get("paths", "db_path", fallback="watch.db"))
 
 def init_db():
 
@@ -51,6 +55,14 @@ def init_db():
     print(f"Base de données créée à {DB_PATH}.")
 
 REQUEST = "SELECT exe_name, exe_path, exe_id, exe_launched, exe_is_unknown,exe_is_dangerous, exe_blocked FROM exe_list"
+
+def get_all_exe():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute( REQUEST )
+    rows = cur.fetchall()
+    conn.close()
+    return rows
 
 def get_known_watched_processes():
     conn = sqlite3.connect(DB_PATH)

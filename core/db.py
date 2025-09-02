@@ -2,7 +2,7 @@ import configparser
 import os
 import sqlite3
 import datetime
-import psutil  # pip install psutil
+import psutil
 
 config = configparser.ConfigParser()
 config.read("config.ini")
@@ -34,7 +34,6 @@ def init_db():
             exe_is_unknown BOOLEAN NOT NULL DEFAULT 0,
             exe_is_watched BOOLEAN NOT NULL DEFAULT 0,
             exe_launched BOOLEAN NOT NULL DEFAULT 0,
-                
             exe_is_dangerous BOOLEAN NOT NULL DEFAULT 0,
             exe_blocked BOOLEAN NOT NULL DEFAULT 0
         )
@@ -46,7 +45,7 @@ def init_db():
             exe_id INTEGER NOT NULL,
             eev_type INTEGER NOT NULL,
             eev_timestamp TIMESTAMP NOT NULL,
-            FOREIGN KEY(exe_id) REFERENCES exe_list(id)
+            FOREIGN KEY(exe_id) REFERENCES exe_list(exe_id)
         )
     """)
    
@@ -61,8 +60,37 @@ def get_all_exe():
     cur = conn.cursor()
     cur.execute( REQUEST )
     rows = cur.fetchall()
+    
+    ExeListObj = lambda exe_name, exe_path, exe_id, exe_launched, exe_is_unknown,exe_is_dangerous, exe_blocked: {
+        "exe_name": exe_name,
+        "exe_path": exe_path,
+        "exe_id": exe_id,
+        "exe_launched": exe_launched,
+        "exe_is_unknown": exe_is_unknown,
+        "exe_is_dangerous": exe_is_dangerous,
+        "exe_blocked": exe_blocked
+    }
+    retour = [ExeListObj(*row) for row in rows]
+
     conn.close()
-    return rows
+    return retour
+
+def get_all_events():
+    conn = sqlite3.connect(DB_PATH)
+    cur = conn.cursor()
+    cur.execute("SELECT eev_id,exe_id,eev_type,eev_timestamp FROM exe_event")
+    rows = cur.fetchall()
+
+    ExeEvent = lambda eev_id, exe_id, eev_type, eev_timestamp: {
+        "eev_id": eev_id,
+        "exe_id": exe_id,
+        "eev_type": eev_type,
+        "eev_timestamp": eev_timestamp
+    }
+    retour = [ExeEvent(*row) for row in rows]
+    
+    conn.close()
+    return retour
 
 def get_known_watched_processes():
     conn = sqlite3.connect(DB_PATH)
@@ -164,5 +192,11 @@ def add_event(exe_id, event_type):
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""INSERT INTO exe_event (exe_id, eev_type, eev_timestamp) VALUES (?, ?, ?)""", (exe_id, event_type, datetime.datetime.now().isoformat()))
+    
+    cur.execute("SELECT * FROM exe_event WHERE eev_id = ?", (cur.lastrowid,))
+    row = cur.fetchone()
+    
     conn.commit()
     conn.close()
+
+    return row

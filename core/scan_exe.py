@@ -1,7 +1,6 @@
 import os
 
 from core.db import add_or_update_executable, get_all_exe
-from core.notification import send_data
 
 def find_exe_files(start_dirs):
     exe_files = []
@@ -52,10 +51,3 @@ def scan_exe(avoid_scan_windows_folder=True):
     for exe in exe_files:
         exe_name = os.path.basename(exe)
         add_or_update_executable(exe_name, exe)
-
-        with open("found_exe_files.txt", "w", encoding="utf-8") as f:
-            for exe in exe_files:
-                f.write(exe + "\n")
-    
-    exes = get_all_exe()
-    send_data(exes, "exe_queue")

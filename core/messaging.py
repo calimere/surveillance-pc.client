@@ -5,22 +5,28 @@ import pika
 from enum import Enum
 from business import ESyncType
 from core.db import get_all_events, get_all_exe
+import paho.mqtt.client as mqtt
 
 config = configparser.ConfigParser()
 config.read("config.ini")
 
-RABBITMQ_HOST = config.get("messaging", "amqp_host", fallback="localhost")
-RABBITMQ_PORT = config.getint("messaging", "amqp_port", fallback=5672)
-RABBITMQ_USER = config.get("messaging", "amqp_user", fallback="guest")
-RABBITMQ_PASSWORD = config.get("messaging", "amqp_password", fallback="guest")
+RABBITMQ_HOST_AMQP = config.get("messaging", "amqp_host", fallback="localhost")
+RABBITMQ_PORT_AMQP = config.getint("messaging", "amqp_port", fallback=5672)
+RABBITMQ_USER_AMQP = config.get("messaging", "amqp_user", fallback="guest")
+RABBITMQ_PASSWORD_AMQP = config.get("messaging", "amqp_password", fallback="guest")
+
+RABBITMQ_HOST_MQTT = config.get("messaging", "amqp_host", fallback="localhost")
+RABBITMQ_PORT_MQTT = config.getint("messaging", "amqp_port", fallback=5672)
+RABBITMQ_USER_MQTT = config.get("messaging", "amqp_user", fallback="guest")
+RABBITMQ_PASSWORD_MQTT = config.get("messaging", "amqp_password", fallback="guest")
 
 def amqp_publish(message, channel_name='discover'):
     try:
         connection = pika.BlockingConnection(
             pika.ConnectionParameters(
-                host=RABBITMQ_HOST,
-                port=RABBITMQ_PORT,
-                credentials=pika.PlainCredentials(RABBITMQ_USER, RABBITMQ_PASSWORD)
+                host=RABBITMQ_HOST_AMQP,
+                port=RABBITMQ_PORT_AMQP,
+                credentials=pika.PlainCredentials(RABBITMQ_USER_AMQP, RABBITMQ_PASSWORD_AMQP)
             )
         )
     except pika.exceptions.AMQPConnectionError as e:
@@ -47,6 +53,12 @@ def send_data(data, channel_name):
             data = json.dumps({"message": data})
 
     amqp_publish(data, channel_name)
+
+# def mqtt_publish(message, topic='discover'):
+#     client = mqtt.Client()
+#     client.connect("localhost", 1883, 60)
+#     client.publish(topic, message)
+#     client.disconnect()
 
 def sync(event_type):
 

@@ -136,3 +136,5 @@ cython_debug/
 
 # VS Code settings
 .vscode/
+
+*.exe

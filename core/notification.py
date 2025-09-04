@@ -3,7 +3,7 @@ import configparser
 import pika
 import json
 
-from messaging import amqp_publish
+from core.messaging import amqp_publish
 
 config = configparser.ConfigParser()
 config.read("config.ini")

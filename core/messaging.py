@@ -5,7 +5,6 @@ import pika
 from enum import Enum
 from business import ESyncType
 from core.db import get_all_events, get_all_exe
-import paho.mqtt.client as mqtt
 
 config = configparser.ConfigParser()
 config.read("config.ini")
@@ -53,12 +52,6 @@ def send_data(data, channel_name):
             data = json.dumps({"message": data})
 
     amqp_publish(data, channel_name)
-
-# def mqtt_publish(message, topic='discover'):
-#     client = mqtt.Client()
-#     client.connect("localhost", 1883, 60)
-#     client.publish(topic, message)
-#     client.disconnect()
 
 def sync(event_type):
 

@@ -3,8 +3,8 @@
 
 # Créez un fichier installer.nsi avec le contenu suivant :
 
-OutFile "MyServiceInstaller.exe"
-InstallDir "$PROGRAMFILES\MyPythonService"
+OutFile "surveillance_pc_service.exe"
+InstallDir "$PROGRAMFILES\\surveillance-pc"
 RequestExecutionLevel admin
 
 Section "Install"
@@ -12,14 +12,14 @@ Section "Install"
     SetOutPath "$INSTDIR"
 
     ; Copie les exécutables dans le répertoire d'installation
-    File "dist\MyService.exe"
-    File "dist\ServiceInstaller.exe"
+    File "dist\surveillance-pc.exe"
+    File "dist\surveillance_pc_service.exe"
 
     ; Installe le service Windows
-    Exec '"$INSTDIR\ServiceInstaller.exe" install'
+    Exec '"$INSTDIR\surveillance_pc_service.exe" install'
 
     ; Démarre le service
-    Exec '"$INSTDIR\ServiceInstaller.exe" start'
+    Exec '"$INSTDIR\surveillance_pc_service.exe" start'
 
     ; Affiche un message de succès
     MessageBox MB_OK "Installation terminée avec succès !"
@@ -27,14 +27,14 @@ SectionEnd
 
 Section "Uninstall"
     ; Arrête le service
-    Exec '"$INSTDIR\ServiceInstaller.exe" stop'
+    Exec '"$INSTDIR\surveillance_pc_service.exe" stop'
 
     ; Désinstalle le service
-    Exec '"$INSTDIR\ServiceInstaller.exe" remove'
+    Exec '"$INSTDIR\surveillance_pc_service.exe" remove'
 
     ; Supprime les fichiers
-    Delete "$INSTDIR\MyService.exe"
-    Delete "$INSTDIR\ServiceInstaller.exe"
+    Delete "$INSTDIR\surveillance-pc.exe"
+    Delete "$INSTDIR\surveillance_pc_service.exe"
 
     ; Supprime le répertoire
     RMDir "$INSTDIR"

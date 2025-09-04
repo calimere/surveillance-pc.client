@@ -5,7 +5,7 @@ from core.db import get_all_events, get_all_exe, get_known_blocked_processes, ge
 from core.running_processes import scan_running_processes
 from core.scan_exe import scan_exe
 from core.notification import send_discord_notification
-from messaging import sync
+from core.messaging import sync
 
 print("Démarrage de la surveillance des exécutables...")
 send_discord_notification("Démarrage de la surveillance des exécutables...")

@@ -1,0 +1,1 @@
+CONFIG_FILE = "C:\\dev\\surveillance-pc\\os-windows\\dist\\surveillance_pc\\config.ini"  

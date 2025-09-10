@@ -4,7 +4,7 @@
 # Créez un fichier installer.nsi avec le contenu suivant :
 
 OutFile "surveillance_pc_service.exe"
-InstallDir "$PROGRAMFILES\\surveillance-pc"
+InstallDir "$PROGRAMFILES\\surveillance_pc"
 RequestExecutionLevel admin
 
 Section "Install"
@@ -12,8 +12,18 @@ Section "Install"
     SetOutPath "$INSTDIR"
 
     ; Copie les exécutables dans le répertoire d'installation
-    File "dist\surveillance-pc.exe"
-    File "dist\surveillance_pc_service.exe"
+    File "dist\surveillance_pc\surveillance_pc.exe"
+    File "dist\surveillance_pc_service\surveillance_pc_service.exe"
+
+    ; Copie le répertoire _internal et son contenu
+    SetOutPath "$INSTDIR\_internal"
+    File /r "dist\surveillance_pc\_internal\*.*"
+    File /r "dist\surveillance_pc_service\_internal\*.*"
+
+    ; Copie le fichier config.ini
+    SetOutPath "$INSTDIR"
+    File "dist\surveillance_pc\config.ini"
+    File "dist\surveillance_pc_service\config.ini"
 
     ; Installe le service Windows
     Exec '"$INSTDIR\surveillance_pc_service.exe" install'
@@ -22,7 +32,7 @@ Section "Install"
     Exec '"$INSTDIR\surveillance_pc_service.exe" start'
 
     ; Affiche un message de succès
-    MessageBox MB_OK "Installation terminée avec succès !"
+    MessageBox MB_OK "Installation terminee !"
 SectionEnd
 
 Section "Uninstall"
@@ -33,7 +43,7 @@ Section "Uninstall"
     Exec '"$INSTDIR\surveillance_pc_service.exe" remove'
 
     ; Supprime les fichiers
-    Delete "$INSTDIR\surveillance-pc.exe"
+    Delete "$INSTDIR\surveillance_pc.exe"
     Delete "$INSTDIR\surveillance_pc_service.exe"
 
     ; Supprime le répertoire

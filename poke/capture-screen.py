@@ -2,8 +2,10 @@ import mss
 import requests
 import configparser
 
+from const import CONFIG_FILE
+
 config = configparser.ConfigParser()
-config.read("./config.ini")
+config.read(CONFIG_FILE)
 
 DISCORD_WEBHOOK_URL = config.get("url", "discord_webhook_url", fallback=None)
 DISCORD_SEND = config.getboolean("settings", "discord_send", fallback=False)

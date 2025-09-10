@@ -138,3 +138,5 @@ cython_debug/
 .vscode/
 
 *.exe
+
+poke/*.png

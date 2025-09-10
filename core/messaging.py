@@ -3,11 +3,12 @@ import json
 import pika
 
 from enum import Enum
-from business import ESyncType
+from business.ESyncType import ESyncType
+from const import CONFIG_FILE
 from core.db import get_all_events, get_all_exe
 
 config = configparser.ConfigParser()
-config.read("config.ini")
+config.read(CONFIG_FILE)
 
 RABBITMQ_HOST_AMQP = config.get("messaging", "amqp_host", fallback="localhost")
 RABBITMQ_PORT_AMQP = config.getint("messaging", "amqp_port", fallback=5672)

@@ -2,10 +2,11 @@ import configparser
 import os
 import sqlite3
 import datetime
-import psutil
+
+from const import CONFIG_FILE
 
 config = configparser.ConfigParser()
-config.read("config.ini")
+config.read(CONFIG_FILE)
 
 APP_DATA_DIR = os.path.join(os.getenv('APPDATA') or os.path.expanduser('~/.config'), 'surveillance-pc')
 DB_PATH = os.path.join(APP_DATA_DIR, config.get("paths", "db_path", fallback="watch.db"))

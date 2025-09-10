@@ -1,6 +1,6 @@
 from enum import Enum
 
 class ESyncType(Enum):
-    EVENT = 'event'
-    EXE_LIST = 'exe_list',
-    ALL = 'all'
+    EVENT = 0
+    EXE_LIST = 1
+    ALL = 2

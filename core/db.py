@@ -6,7 +6,7 @@ import datetime
 from const import CONFIG_FILE
 
 config = configparser.ConfigParser()
-config.read(CONFIG_FILE)
+test = config.read(CONFIG_FILE)
 
 APP_DATA_DIR = os.path.join(os.getenv('APPDATA') or os.path.expanduser('~/.config'), 'surveillance-pc')
 DB_PATH = os.path.join(APP_DATA_DIR, config.get("paths", "db_path", fallback="watch.db"))
@@ -14,6 +14,8 @@ DB_PATH = os.path.join(APP_DATA_DIR, config.get("paths", "db_path", fallback="wa
 def init_db():
 
     print("Initialisation de la base de données...")
+
+    print(f"Vérification de l'existence de la base de données à {DB_PATH}...")
 
     if os.path.exists(DB_PATH):
         print("Base de données déjà initialisée.")

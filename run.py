@@ -19,8 +19,8 @@ avoid_scan = config.getboolean("settings", "avoid_scan", fallback=False)
 avoid_windows_scan = config.getboolean("settings", "avoid_windows_scan", fallback=True)
 
 # tempo_sync can't be more than tempo_scan
-tempo_scan = config.getint("settings", "tempo_scan", fallback=600)
-tempo_sync = config.getint("settings", "tempo_sync", fallback=300)
+tempo_scan = config.getint("settings", "tempo_scan", fallback=500)
+tempo_sync = config.getint("settings", "tempo_sync", fallback=250)
 iterator = 0
 
 while(True):

@@ -1,19 +1,16 @@
 import configparser
 import time
 from business.ESyncType import ESyncType
-from const import CONFIG_FILE
 from core.db import get_known_blocked_processes, get_unknown_processes, get_known_watched_processes, init_db
 from core.running_processes import scan_running_processes
 from core.scan_exe import scan_exe
 from core.notification import send_discord_notification
 from core.messaging import sync
+from core.config import config 
 
 print("Démarrage de la surveillance des exécutables...")
 send_discord_notification("Démarrage de la surveillance des exécutables...")
 init_db()
-
-config = configparser.ConfigParser()
-config.read(CONFIG_FILE)
 
 avoid_scan = config.getboolean("settings", "avoid_scan", fallback=False)
 avoid_windows_scan = config.getboolean("settings", "avoid_windows_scan", fallback=True)

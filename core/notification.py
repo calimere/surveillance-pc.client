@@ -1,11 +1,10 @@
 import requests
 import configparser
 
-from const import CONFIG_FILE
 from core.messaging import amqp_publish
 
 config = configparser.ConfigParser()
-config.read(CONFIG_FILE)
+config.read("config.ini")
 DISCORD_WEBHOOK_URL = config.get("url", "discord_webhook_url", fallback="")
 DISCORD_SEND = config.getboolean("settings", "discord_send", fallback=False)
 

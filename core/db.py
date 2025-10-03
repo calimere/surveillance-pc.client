@@ -2,28 +2,21 @@ import configparser
 import os
 import sqlite3
 import datetime
-
-from const import CONFIG_FILE
-
-config = configparser.ConfigParser()
-test = config.read(CONFIG_FILE)
-
-APP_DATA_DIR = os.path.join(os.getenv('APPDATA') or os.path.expanduser('~/.config'), 'surveillance-pc')
-DB_PATH = os.path.join(APP_DATA_DIR, config.get("paths", "db_path", fallback="watch.db"))
+from core.config import get_db_path
 
 def init_db():
 
     print("Initialisation de la base de données...")
 
-    print(f"Vérification de l'existence de la base de données à {DB_PATH}...")
+    print(f"Vérification de l'existence de la base de données à {get_db_path()}...")
 
-    if os.path.exists(DB_PATH):
+    if os.path.exists(get_db_path()):
         print("Base de données déjà initialisée.")
         return
-    
-    print(f"Création de la base de données à {DB_PATH}...")
-    os.makedirs(APP_DATA_DIR, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+
+    print(f"Création de la base de données à {get_db_path()}...")
+    os.makedirs(get_db_path(), exist_ok=True)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
     cur.execute("""
@@ -54,12 +47,12 @@ def init_db():
    
     conn.commit()
     conn.close()
-    print(f"Base de données créée à {DB_PATH}.")
+    print(f"Base de données créée à {get_db_path()}.")
 
 REQUEST = "SELECT exe_name, exe_path, exe_id, exe_launched, exe_is_unknown,exe_is_dangerous, exe_blocked FROM exe_list"
 
 def get_all_exe():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
     cur.execute( REQUEST )
     rows = cur.fetchall()
@@ -79,7 +72,7 @@ def get_all_exe():
     return retour
 
 def get_all_events():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
     cur.execute("SELECT eev_id,exe_id,eev_type,eev_timestamp FROM exe_event")
     rows = cur.fetchall()
@@ -96,7 +89,7 @@ def get_all_events():
     return retour
 
 def get_known_watched_processes():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
     cur.execute(REQUEST + " WHERE exe_is_watched=1 and exe_is_unknown=0")
     rows = cur.fetchall()
@@ -104,7 +97,7 @@ def get_known_watched_processes():
     return rows
 
 def get_known_blocked_processes():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
     cur.execute( REQUEST + " WHERE exe_blocked=1 and exe_is_unknown=0")
     rows = cur.fetchall()
@@ -112,7 +105,7 @@ def get_known_blocked_processes():
     return rows
 
 def get_unknown_processes():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
     cur.execute( REQUEST + " WHERE exe_is_unknown=1")
     rows = cur.fetchall()
@@ -120,14 +113,14 @@ def get_unknown_processes():
     return rows
 
 def update_launched_status(exe_id, launched):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
     cur.execute("UPDATE exe_list SET exe_launched=? WHERE exe_id=?", (launched, exe_id))
     conn.commit()
     conn.close()
 
 def get_process_by_name(name,path):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
     cur.execute("SELECT exe_id FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
@@ -137,7 +130,7 @@ def get_process_by_name(name,path):
     return row[0] if row else None
 
 def add_or_update_unknown_executable(name, path):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
     cur.execute("SELECT exe_id FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
@@ -164,7 +157,7 @@ def add_or_update_unknown_executable(name, path):
     return exe_id
 
 def add_or_update_executable(name, path):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
     cur.execute("SELECT exe_id FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
@@ -192,7 +185,7 @@ def add_or_update_executable(name, path):
 
 #event_type: 0=STOP, 1=START, 2=KILL
 def add_event(exe_id, event_type):
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
     cur.execute("""INSERT INTO exe_event (exe_id, eev_type, eev_timestamp) VALUES (?, ?, ?)""", (exe_id, event_type, datetime.datetime.now().isoformat()))
     

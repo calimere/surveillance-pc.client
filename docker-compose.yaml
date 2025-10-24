@@ -1,0 +1,33 @@
+version: "3.9"
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mosquitto-surveillance
+    restart: unless-stopped
+    ports:
+      - "1884:1883" # Port MQTT
+      - "9002:9001" # Port WebSocket (optionnel)
+    volumes:
+      - /mnt/mosquitto-surveillance/config:/mosquitto/config
+      - /mnt/mosquitto-surveillance/data:/mosquitto/data
+      - /mnt/mosquitto-surveillance/log:/mosquitto/log
+    environment:
+      - TZ=Europe/Paris
+  mssql:
+    image: mcr.microsoft.com/mssql/server:2019-latest
+    container_name: mssql-surveillance
+    restart: unless-stopped
+    ports:
+      - "33000:1433"
+    environment:
+      - ACCEPT_EULA=Y
+      - SA_PASSWORD=<CskPr0dHomeGuard2025>
+      - MSSQL_PID=Developer
+    volumes:
+      - /mnt/mssql-surveillance/data:/var/opt/mssql
+    healthcheck:
+      test: [ "CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$${SA_PASSWORD}\" -Q \"SELECT 1\" || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5

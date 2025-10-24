@@ -127,3 +127,35 @@ def _generate_client_id(prefix="client"):
     raw_id = f"{prefix}-{hostname}-{mac}"
     # Hash court pour éviter les caractères spéciaux et la longueur excessive
     return hashlib.sha1(raw_id.encode()).hexdigest()[:16]
+
+# def send_data(data, channel_name):
+
+#     # Vérifie si les données sont au format JSON (str ou dict)
+#     if isinstance(data, dict):
+#         data = json.dumps(data)
+#     elif isinstance(data, list):
+#         data = json.dumps(data)
+#     elif isinstance(data, str):
+#         try:
+#             json.loads(data)
+#         except (ValueError, TypeError):
+#             data = json.dumps({"message": data})
+
+#     publish(channel_name, data)
+
+# def sync(event_type):
+
+#     if event_type == ESyncType.EVENT:
+#         events = get_all_events()
+#         send_data(events, "event_queue")
+#     elif event_type == ESyncType.EXE_LIST:
+#         exes = get_all_exe()
+#         send_data(exes, "exe_queue")
+#     elif event_type == ESyncType.ALL:
+#         events = get_all_events()
+#         send_data(events, "event_queue")
+#         exes = get_all_exe()
+#         send_data(exes, "exe_queue")
+#     else:
+#         print("Type de synchronisation inconnu.")
+#         return

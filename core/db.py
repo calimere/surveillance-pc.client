@@ -196,3 +196,24 @@ def add_event(exe_id, event_type):
     conn.close()
 
     return row
+
+def set_executable_blocked(exe_id, blocked):
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+    cur.execute("UPDATE exe_list SET exe_blocked=? WHERE exe_id=?", (blocked, exe_id))
+    conn.commit()
+    conn.close()
+
+def set_executable_dangerous(exe_id, dangerous):
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+    cur.execute("UPDATE exe_list SET exe_is_dangerous=? WHERE exe_id=?", (dangerous, exe_id))
+    conn.commit()
+    conn.close()
+
+def set_executable_watched(exe_id, watched):
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+    cur.execute("UPDATE exe_list SET exe_is_watched=? WHERE exe_id=?", (watched, exe_id))
+    conn.commit()
+    conn.close()

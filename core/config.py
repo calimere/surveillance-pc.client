@@ -1,6 +1,7 @@
 import os
 import sys
 import configparser
+import socket
 
 def get_base_path():
     """Retourne le dossier de l'exécutable ou du script"""
@@ -28,6 +29,10 @@ def get_db_path():
     db_filename = config.get("paths", "db_path", fallback="watch.db")
     return os.path.join(app_data_dir, db_filename)
 
+def get_pc_alias():
+    return os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or socket.gethostname()
+
 # Charger la config une seule fois
 config = configparser.ConfigParser()
 config.read(get_config_path())
+

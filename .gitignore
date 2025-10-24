@@ -139,5 +139,6 @@ cython_debug/
 
 *.exe
 
-poke/*.png
+poc/*.png
 
+config.ini

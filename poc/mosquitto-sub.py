@@ -5,7 +5,7 @@ import paho.mqtt.client as mqtt
 
 MOSQUITTO_HOST = "192.168.1.56"
 MOSQUITTO_PORT = 1884
-TOPIC = "test/topic"
+TOPIC = "surveillance/+/ack"
 CLIENT_ID = "calimere"
 
 # Credentials créés sur le serveur Mosquitto
@@ -16,6 +16,7 @@ def on_connect(client, userdata, flags, rc):
     if rc == 0:
         print(f"Connecté à {MOSQUITTO_HOST}:{MOSQUITTO_PORT}")
         client.subscribe(TOPIC)
+        client.subscribe("surveillance/uptime")
         print(f"Abonné au topic '{TOPIC}'")
     elif rc == 4:
         print("Échec d'authentification (bad username or password)")

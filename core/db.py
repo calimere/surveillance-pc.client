@@ -2,7 +2,7 @@ import configparser
 import os
 import sqlite3
 import datetime
-from core.config import get_db_path
+from core.config import get_app_data_dir, get_db_path
 
 def init_db():
 
@@ -15,7 +15,7 @@ def init_db():
         return
 
     print(f"Création de la base de données à {get_db_path()}...")
-    os.makedirs(get_db_path(), exist_ok=True)
+    os.makedirs(get_app_data_dir(), exist_ok=True)
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
@@ -155,6 +155,44 @@ def add_or_update_unknown_executable(name, path):
     conn.commit()
     conn.close()
     return exe_id
+
+def get_exe_by_name_path(name, path):
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+
+    cur.execute("SELECT exe_id, exe_name, exe_path, exe_program_name, exe_first_seen, exe_last_seen, exe_is_unknown, exe_is_watched, exe_launched, exe_is_dangerous, exe_blocked FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
+    row = cur.fetchone()
+
+    conn.close()
+    return row
+
+def add_executable(name, path):
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+
+    now = datetime.datetime.now().isoformat()
+
+    print(f"Nouvel exécutable détecté : {name}")
+    cur.execute("""INSERT INTO exe_list (exe_name, exe_path, exe_program_name , exe_first_seen , exe_last_seen , exe_is_unknown,exe_is_watched ,exe_launched ,exe_is_dangerous ,exe_blocked ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0)""", (name, path, name, now, now))
+    exe_id = cur.lastrowid
+
+    conn.commit()
+    conn.close()
+    return exe_id
+def update_executable(exe_id, name, path):
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+
+    now = datetime.datetime.now().isoformat()
+
+    cur.execute("""
+        UPDATE exe_list
+        SET exe_name=?, exe_path=?, exe_last_seen=?
+        WHERE exe_id=?
+    """, (name, path, now, exe_id))
+
+    conn.commit()
+    conn.close()
 
 def add_or_update_executable(name, path):
     conn = sqlite3.connect(get_db_path())

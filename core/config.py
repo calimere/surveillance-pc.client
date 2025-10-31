@@ -27,7 +27,8 @@ def get_db_path():
     app_data_dir = get_app_data_dir()
     os.makedirs(app_data_dir, exist_ok=True)
     db_filename = config.get("paths", "db_path", fallback="watch.db")
-    return os.path.join(app_data_dir, db_filename)
+    db_path = os.path.join(app_data_dir, db_filename)
+    return db_path
 
 def get_pc_alias():
     return os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or socket.gethostname()

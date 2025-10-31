@@ -2,14 +2,6 @@ from core.notification import send_discord_notification
 from core.mqtt_client import publish
 import json
     
-
-#payload object 
-'''
-    "command": "set_watched", 
-    "process_name": "example.exe",
-    "process_id": 1234
-'''
-
 def handle_surveillance_cmd(payload):
 
     payload_obj = None
@@ -36,3 +28,6 @@ def handle_surveillance_cmd(payload):
 
     publish("surveillance/[client]/ack", json.dumps({"status": "accepted", "original_command": payload_obj}))
     pass
+
+def handle_surveillance_ack(payload):
+    send_discord_notification(f"Accusé de réception reçu via MQTT: {payload}")

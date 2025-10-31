@@ -17,7 +17,6 @@ mqtt_keepalive = config.getint("mqtt", "keepalive", fallback=60)
 _client = None
 _handlers = {}  # Dictionnaire topic -> fonction callback
 
-
 def _on_connect(client, userdata, flags, rc):
     if rc == 0:
         print("✅ Connecté au broker MQTT")
@@ -27,7 +26,6 @@ def _on_connect(client, userdata, flags, rc):
             print(f"📡 Auto-subscribe: {topic}")
     else:
         print(f"⚠️ Erreur de connexion MQTT (code {rc})")
-
 
 def _on_message(client, userdata, msg):
     payload = msg.payload.decode()
@@ -42,12 +40,10 @@ def _on_message(client, userdata, msg):
     else:
         print(f"⚠️ Aucun handler défini pour {msg.topic}")
 
-
 def _mqtt_loop():
     """Boucle MQTT dans un thread séparé."""
     global _client
     _client.loop_forever()
-
 
 def init_mqtt():
     """Initialise et connecte le client MQTT (à appeler au démarrage)."""
@@ -55,7 +51,7 @@ def init_mqtt():
     if _client is not None:
         return _client  # déjà initialisé
 
-    client_id = _generate_client_id("mon_app")
+    client_id = _generate_client_id()
 
     _client = mqtt.Client()
     _client.on_connect = _on_connect
@@ -74,8 +70,7 @@ def init_mqtt():
     time.sleep(1)
     return _client
 
-
-def publish(topic: str, payload: str, qos: int = 0, retain: bool = False):
+def publish(topic: str, payload: str = None, qos: int = 0, retain: bool = False):
     """Publication via le client global."""
     if _client is not None:
 
@@ -97,7 +92,6 @@ def publish(topic: str, payload: str, qos: int = 0, retain: bool = False):
     else:
         print("❌ Client MQTT non initialisé !")
 
-
 def subscribe(topic: str, handler=None, qos: int = 0):
     """Souscription à un topic et enregistrement d'un handler optionnel."""
     if _client is not None:
@@ -112,12 +106,11 @@ def subscribe(topic: str, handler=None, qos: int = 0):
     else:
         print("❌ Client MQTT non initialisé !")
 
-
 def register_handler(topic: str, handler):
     """Enregistre un handler pour un topic sans s'abonner."""
     _handlers[topic] = handler
 
-def _generate_client_id(prefix="client"):
+def _generate_client_id(prefix="petit_flic_mqtt"):
     """
     Génère un identifiant MQTT unique et stable pour ce poste.
     Basé sur la MAC + hostname.
@@ -127,35 +120,3 @@ def _generate_client_id(prefix="client"):
     raw_id = f"{prefix}-{hostname}-{mac}"
     # Hash court pour éviter les caractères spéciaux et la longueur excessive
     return hashlib.sha1(raw_id.encode()).hexdigest()[:16]
-
-# def send_data(data, channel_name):
-
-#     # Vérifie si les données sont au format JSON (str ou dict)
-#     if isinstance(data, dict):
-#         data = json.dumps(data)
-#     elif isinstance(data, list):
-#         data = json.dumps(data)
-#     elif isinstance(data, str):
-#         try:
-#             json.loads(data)
-#         except (ValueError, TypeError):
-#             data = json.dumps({"message": data})
-
-#     publish(channel_name, data)
-
-# def sync(event_type):
-
-#     if event_type == ESyncType.EVENT:
-#         events = get_all_events()
-#         send_data(events, "event_queue")
-#     elif event_type == ESyncType.EXE_LIST:
-#         exes = get_all_exe()
-#         send_data(exes, "exe_queue")
-#     elif event_type == ESyncType.ALL:
-#         events = get_all_events()
-#         send_data(events, "event_queue")
-#         exes = get_all_exe()
-#         send_data(exes, "exe_queue")
-#     else:
-#         print("Type de synchronisation inconnu.")
-#         return

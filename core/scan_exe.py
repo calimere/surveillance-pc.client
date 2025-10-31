@@ -1,6 +1,9 @@
 import os
 
-from core.db import add_or_update_executable, get_all_exe
+from yarg import get
+
+from core.db import add_executable, add_or_update_executable, get_all_exe, get_exe_by_name_path, update_executable
+from core.mqtt_publish import publish_executable_add, publish_executable_update
 
 def find_exe_files(start_dirs):
     exe_files = []
@@ -50,4 +53,17 @@ def scan_exe(avoid_scan_windows_folder=True):
 
     for exe in exe_files:
         exe_name = os.path.basename(exe)
-        add_or_update_executable(exe_name, exe)
+        exe_path = exe
+        exe_is_system = exe.lower().startswith(r"c:\windows")
+        #exe_icon = ""
+        #exe_hash = ""
+        #exe_signed_by = ""
+
+        e = get_exe_by_name_path(exe_name, exe_path)
+        if e is None:
+            publish_executable_add(exe_name, exe_path)
+            add_executable(exe_name, exe_path)
+        else:
+            if e[1] != exe_name or e[2] != exe_path:
+                publish_executable_update(e[0], exe_name, exe_path)
+                update_executable(e[0], exe_name, exe_path)

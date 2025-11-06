@@ -45,6 +45,15 @@ def init_db():
         )
     """)
    
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS config (
+            cfg_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cfg_key TEXT NOT NULL,
+            cfg_value TEXT NOT NULL,
+            created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()
     conn.close()
     print(f"Base de données créée à {get_db_path()}.")
@@ -179,6 +188,7 @@ def add_executable(name, path):
     conn.commit()
     conn.close()
     return exe_id
+
 def update_executable(exe_id, name, path):
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
@@ -255,3 +265,29 @@ def set_executable_watched(exe_id, watched):
     cur.execute("UPDATE exe_list SET exe_is_watched=? WHERE exe_id=?", (watched, exe_id))
     conn.commit()
     conn.close()
+
+def add_or_update_config(cfg_key, cfg_value):
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+
+    cur.execute("SELECT cfg_id FROM config WHERE cfg_key=?", (cfg_key,))
+    row = cur.fetchone()
+
+    now = datetime.datetime.now().isoformat()
+
+    if row:  # déjà connu → mise à jour
+
+        cur.execute("""
+            UPDATE config
+            SET cfg_value=?, created=?
+            WHERE cfg_id=?
+        """, (cfg_value, now, row[0]))
+        cfg_id = row[0]
+    else:  # nouvel cfg → insertion
+
+        cur.execute("""INSERT INTO config (cfg_key, cfg_value, created) VALUES (?, ?, ?)""", (cfg_key, cfg_value, now))
+        cfg_id = cur.lastrowid
+
+    conn.commit()
+    conn.close()
+    return cfg_id

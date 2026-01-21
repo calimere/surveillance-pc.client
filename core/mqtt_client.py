@@ -1,6 +1,7 @@
 import hashlib
 from socket import socket
 import uuid
+from core.authentication import generate_client_id
 import paho.mqtt.client as mqtt
 import threading
 import time
@@ -51,7 +52,7 @@ def init_mqtt():
     if _client is not None:
         return _client  # déjà initialisé
 
-    client_id = _generate_client_id()
+    client_id = generate_client_id()
 
     _client = mqtt.Client()
     _client.on_connect = _on_connect
@@ -109,14 +110,3 @@ def subscribe(topic: str, handler=None, qos: int = 0):
 def register_handler(topic: str, handler):
     """Enregistre un handler pour un topic sans s'abonner."""
     _handlers[topic] = handler
-
-def _generate_client_id(prefix="petit_flic_mqtt"):
-    """
-    Génère un identifiant MQTT unique et stable pour ce poste.
-    Basé sur la MAC + hostname.
-    """
-    mac = uuid.getnode()
-    hostname = get_pc_alias()
-    raw_id = f"{prefix}-{hostname}-{mac}"
-    # Hash court pour éviter les caractères spéciaux et la longueur excessive
-    return hashlib.sha1(raw_id.encode()).hexdigest()[:16]

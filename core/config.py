@@ -33,7 +33,9 @@ def get_db_path():
 def get_pc_alias():
     return os.environ.get("COMPUTERNAME") or os.environ.get("HOSTNAME") or socket.gethostname()
 
+def get_api_url():
+    return config.get("api", "url", fallback="https://api.surveillance-pc.example.com")
+
 # Charger la config une seule fois
 config = configparser.ConfigParser()
 config.read(get_config_path())
-

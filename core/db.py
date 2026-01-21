@@ -175,7 +175,7 @@ def get_exe_by_name_path(name, path):
     conn.close()
     return row
 
-def add_executable(name, path):
+def add_executable(name, path, exe_hash, exe_signed_by):
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 

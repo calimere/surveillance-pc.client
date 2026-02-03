@@ -43,6 +43,15 @@ subscribe("surveillance/[client]/cmd", handle_surveillance_cmd)
 subscribe("surveillance/[client]/ack", handle_surveillance_ack)
 publish("surveillance/[client]/uptime")
 
+#finir la gestion des insertions en base des informations des exe
+#faire la synchro des exe avec le serveur distant
+#vérifier s'il faut faire une synchro avec le serveur distant en mqtt ou en http
+#stocker la dernière date de synchro sur le serveur distant
+#ajouter une vérification de synchro et récupérer la sauvegarde depuis le serveur distant si besoin
+#ajouter la possibilité de fermer un processus à distance via mqtt
+#ajouter la possibilité de lancer un processus à distance via mqtt
+
+
 # main loop
 while(True):
 

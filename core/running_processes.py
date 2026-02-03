@@ -6,7 +6,7 @@ from core.notification import send_message
 
 def scan_running_processes(watched_processes,unknown_processes,blocked_processes):
     #Parcourt tous les processus actifs et met à jour la base.
-    for proc in psutil.process_iter(['pid', 'name', 'exe']):
+    for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmd_line']):
         try:
             name = proc.info['name']
             path = proc.info['exe'] or ""

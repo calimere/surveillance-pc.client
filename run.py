@@ -9,8 +9,11 @@ from core.notification import send_discord_notification
 from core.config import config, get_pc_alias
 from core.mqtt_client import generate_client_id, init_mqtt, publish, subscribe
 from core.mqtt_handlers import handle_surveillance_cmd, handle_surveillance_ack
+from core.logger import get_logger
 
-print("Démarrage de la surveillance des exécutables...")
+logger = get_logger("main")
+
+logger.info("Démarrage de la surveillance des exécutables...")
 send_discord_notification(f"Démarrage de la surveillance des exécutables sur le pc {get_pc_alias()}...")
 init_db()
 
@@ -48,7 +51,7 @@ if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
 #ajouter une vérification de synchro et récupérer la sauvegarde depuis le serveur distant si besoin
 #ajouter la possibilité de fermer un processus à distance via mqtt
 #ajouter la possibilité de lancer un processus à distance via mqtt
-
+#vérifier régulièrement si mqtt est disponible et republier les messages en attente dans la queue via API
 
 # main loop
 while(True):
@@ -63,6 +66,6 @@ while(True):
     scan_running_processes(watched_processes, unknown_processes, blocked_processes)
 
     iterator += 1
-    print(f"Prochaine analyse dans {tempo_scan - iterator} secondes...")
+    logger.debug(f"Prochaine analyse dans {tempo_scan - iterator} secondes...")
     publish("surveillance/[client]/uptime")
     time.sleep(1)

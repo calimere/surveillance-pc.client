@@ -5,3 +5,4 @@ Requests
 psutil
 pyinstaller
 configparser
+peewee

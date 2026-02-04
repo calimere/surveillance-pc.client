@@ -1,298 +1,313 @@
-import configparser
 import os
-import sqlite3
 import datetime
+from business.EExeEventType import EExeEventType
 from core.config import get_app_data_dir, get_db_path
+from peewee import *
+from core.logger import get_logger
+
+logger = get_logger("db")
+
+db = SqliteDatabase(None)
+
+class BaseModel(Model):
+    class Meta:
+        database = db
+
+class ExeList(BaseModel):
+    exe_id = AutoField(primary_key=True)
+    exe_name = TextField()
+    exe_path = TextField()
+    exe_program_name = TextField()
+    exe_first_seen = DateTimeField()
+    exe_last_seen = DateTimeField()
+    exe_is_unknown = BooleanField(default=False)
+    exe_is_watched = BooleanField(default=False)
+    exe_launched = BooleanField(default=False)
+    exe_is_dangerous = BooleanField(default=False)
+    exe_blocked = BooleanField(default=False)
+    exe_icon = BlobField(null=True)
+    exe_is_system = BooleanField(default=False)
+    exe_hash = TextField(null=True)
+    exe_signed_by = TextField(null=True)
+
+    class Meta:
+        table_name = 'exe_list'
+
+class ExeEvent(BaseModel):
+    eev_id = AutoField(primary_key=True)
+    exe = ForeignKeyField(ExeList, backref='events', column_name='exe_id')
+    eev_type = TextField()
+    eev_timestamp = DateTimeField()
+
+    class Meta:
+        table_name = 'exe_event'
+
+class Config(BaseModel):
+    cfg_id = AutoField(primary_key=True)
+    cfg_key = TextField()
+    cfg_value = TextField()
+    created = DateTimeField(default=datetime.datetime.now)
+
+    class Meta:
+        table_name = 'config'
+
+class Notification(BaseModel):
+    ntf_id = AutoField(primary_key=True)
+    ntf_type = TextField() # type of alarm (e.g., "exe_launched", "exe_blocked", "hash_changed", etc.)
+    ntf_message = TextField() # JSON data related to the alarm
+    created = DateTimeField(default=datetime.datetime.now)
+    exe_id = IntegerField(null=True)
+
+    class Meta:
+        table_name = 'notification'
+
+class Queue(BaseModel):
+    que_id = AutoField(primary_key=True)
+    que_type = TextField() # type of item to process (e.g., "exe_event", "exe_list", "alarms", etc.)
+    que_data = TextField() # JSON data related to the item
+    created = DateTimeField(default=datetime.datetime.now)
+
+    class Meta:
+        table_name = 'queue'
 
 def init_db():
-
-    print("Initialisation de la base de données...")
-
-    print(f"Vérification de l'existence de la base de données à {get_db_path()}...")
+    logger.info("Initialisation de la base de données...")
+    logger.debug(f"Vérification de l'existence de la base de données à {get_db_path()}...")
 
     if os.path.exists(get_db_path()):
-        print("Base de données déjà initialisée.")
+        logger.info("Base de données déjà initialisée.")
+        db.init(get_db_path())
         return
 
-    print(f"Création de la base de données à {get_db_path()}...")
+    logger.info(f"Création de la base de données à {get_db_path()}...")
     os.makedirs(get_app_data_dir(), exist_ok=True)
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS exe_list (
-            exe_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            exe_name TEXT NOT NULL,
-            exe_path TEXT NOT NULL,
-            exe_program_name TEXT NOT NULL,
-            exe_first_seen TIMESTAMP NOT NULL,
-            exe_last_seen TIMESTAMP NOT NULL,
-            exe_is_unknown BOOLEAN NOT NULL DEFAULT 0,
-            exe_is_watched BOOLEAN NOT NULL DEFAULT 0,
-            exe_launched BOOLEAN NOT NULL DEFAULT 0,
-            exe_is_dangerous BOOLEAN NOT NULL DEFAULT 0,
-            exe_blocked BOOLEAN NOT NULL DEFAULT 0,
-            exe_icon BLOB,
-            exe_is_system BOOLEAN NOT NULL DEFAULT 0,
-            exe_hash TEXT,
-            exe_signed_by TEXT
-        )
-    """)
     
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS exe_event (
-            eev_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            exe_id INTEGER NOT NULL,
-            eev_type INTEGER NOT NULL,
-            eev_timestamp TIMESTAMP NOT NULL,
-            FOREIGN KEY(exe_id) REFERENCES exe_list(exe_id)
-        )
-    """)
-   
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS config (
-            cfg_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            cfg_key TEXT NOT NULL,
-            cfg_value TEXT NOT NULL,
-            created TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+    db.init(get_db_path())
+    db.connect()
+    db.create_tables([ExeList, ExeEvent, Config, Notification, Queue])
+    db.close()
+    
+    logger.info(f"Base de données créée à {get_db_path()}.")
 
-    conn.commit()
-    conn.close()
-    print(f"Base de données créée à {get_db_path()}.")
+def add_notification(alarm_type, message, exe_id=None):
+    db.init(get_db_path())
+    notification = Notification.create(
+        ntf_type=alarm_type,
+        ntf_message=message,
+        exe_id=exe_id,
+        created=datetime.datetime.now()
+    )
+    return notification
 
-REQUEST = "SELECT exe_name, exe_path, exe_id, exe_launched, exe_is_unknown,exe_is_dangerous, exe_blocked FROM exe_list"
+def add_queue(queue_type, queue_data):
+    db.init(get_db_path())
+    queue_item = Queue.create(
+        que_type=queue_type,
+        que_data=queue_data,
+        created=datetime.datetime.now()
+    )
+    return queue_item
 
 def get_all_exe():
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute( REQUEST )
-    rows = cur.fetchall()
+    db.init(get_db_path())
+    query = ExeList.select(ExeList.exe_name, ExeList.exe_path, ExeList.exe_id, 
+                            ExeList.exe_launched, ExeList.exe_is_unknown, 
+                            ExeList.exe_is_dangerous, ExeList.exe_blocked)
     
-    ExeListObj = lambda exe_name, exe_path, exe_id, exe_launched, exe_is_unknown,exe_is_dangerous, exe_blocked: {
-        "exe_name": exe_name,
-        "exe_path": exe_path,
-        "exe_id": exe_id,
-        "exe_launched": exe_launched,
-        "exe_is_unknown": exe_is_unknown,
-        "exe_is_dangerous": exe_is_dangerous,
-        "exe_blocked": exe_blocked,
-        
-    }
-    retour = [ExeListObj(*row) for row in rows]
-
-    conn.close()
-    return retour
+    return [{
+        "exe_name": exe.exe_name,
+        "exe_path": exe.exe_path,
+        "exe_id": exe.exe_id,
+        "exe_launched": exe.exe_launched,
+        "exe_is_unknown": exe.exe_is_unknown,
+        "exe_is_dangerous": exe.exe_is_dangerous,
+        "exe_blocked": exe.exe_blocked,
+    } for exe in query]
 
 def get_all_events():
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute("SELECT eev_id,exe_id,eev_type,eev_timestamp FROM exe_event")
-    rows = cur.fetchall()
-
-    ExeEvent = lambda eev_id, exe_id, eev_type, eev_timestamp: {
-        "eev_id": eev_id,
-        "exe_id": exe_id,
-        "eev_type": eev_type,
-        "eev_timestamp": eev_timestamp
-    }
-    retour = [ExeEvent(*row) for row in rows]
+    db.init(get_db_path())
+    query = ExeEvent.select()
     
-    conn.close()
-    return retour
+    return [{
+        "eev_id": event.eev_id,
+        "exe_id": event.exe_id,
+        "eev_type": event.eev_type,
+        "eev_timestamp": event.eev_timestamp
+    } for event in query]
 
 def get_known_watched_processes():
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute(REQUEST + " WHERE exe_is_watched=1 and exe_is_unknown=0")
-    rows = cur.fetchall()
-    conn.close()
-    return rows
+    db.init(get_db_path())
+    return ExeList.select().where((ExeList.exe_is_watched == True) & (ExeList.exe_is_unknown == False))
 
 def get_known_blocked_processes():
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute( REQUEST + " WHERE exe_blocked=1 and exe_is_unknown=0")
-    rows = cur.fetchall()
-    conn.close()
-    return rows
+    db.init(get_db_path())
+    return ExeList.select().where((ExeList.exe_blocked == True) & (ExeList.exe_is_unknown == False))
 
 def get_unknown_processes():
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute( REQUEST + " WHERE exe_is_unknown=1")
-    rows = cur.fetchall()
-    conn.close()
-    return rows
+    db.init(get_db_path())
+    return ExeList.select().where(ExeList.exe_is_unknown == True)
 
 def update_launched_status(exe_id, launched):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute("UPDATE exe_list SET exe_launched=? WHERE exe_id=?", (launched, exe_id))
-    conn.commit()
-    conn.close()
+    db.init(get_db_path())
+    ExeList.update(exe_launched=launched).where(ExeList.exe_id == exe_id).execute()
 
-def get_process_by_name(name,path):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-
-    cur.execute("SELECT exe_id FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
-    row = cur.fetchone()
-
-    conn.close()
-    return row[0] if row else None
+def get_process_by_name(name, path):
+    db.init(get_db_path())
+    try:
+        exe = ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
+        return exe.exe_id
+    except DoesNotExist:
+        return None
 
 def add_or_update_unknown_executable(name, path):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-
-    cur.execute("SELECT exe_id FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
-    row = cur.fetchone()
-
-    now = datetime.datetime.now().isoformat()
-
-    if row:  # déjà connu → mise à jour
-
-        cur.execute("""
-            UPDATE exe_list
-            SET exe_last_seen=?, exe_still_installed=1
-            WHERE exe_id=?
-        """, (now, row[0]))
-        exe_id = row[0]
-    else:  # nouvel exe → insertion
-
-        print(f"Nouvel exécutable inconnu détecté : {name}")
-        cur.execute("""INSERT INTO exe_list (exe_name, exe_path, exe_program_name , exe_first_seen , exe_last_seen , exe_is_unknown,exe_is_watched ,exe_launched ,exe_is_dangerous ,exe_blocked ) VALUES (?, ?, ?, ?, ?, 1, 1, 0, 0, 0)""", (name, path, name, now, now))
-        exe_id = cur.lastrowid
-
-    conn.commit()
-    conn.close()
+    db.init(get_db_path())
+    now = datetime.datetime.now()
+    
+    try:
+        exe = ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
+        exe.exe_last_seen = now
+        exe.save()
+        exe_id = exe.exe_id
+    except DoesNotExist:
+        logger.info(f"Nouvel exécutable inconnu détecté : {name}")
+        exe = ExeList.create(
+            exe_name=name,
+            exe_path=path,
+            exe_program_name=name,
+            exe_first_seen=now,
+            exe_last_seen=now,
+            exe_is_unknown=True,
+            exe_is_watched=True,
+            exe_launched=False,
+            exe_is_dangerous=False,
+            exe_blocked=False
+        )
+        exe_id = exe.exe_id
+    
     return exe_id
 
 def get_exe_by_name_path(name, path):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-
-    cur.execute("SELECT exe_id, exe_name, exe_path, exe_program_name, exe_first_seen, exe_last_seen, exe_is_unknown, exe_is_watched, exe_launched, exe_is_dangerous, exe_blocked, exe_hash, exe_signed_by, exe_icon, exe_is_system FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
-    row = cur.fetchone()
-
-    conn.close()
-    return row
+    db.init(get_db_path())
+    try:
+        return ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
+    except DoesNotExist:
+        return None
 
 def add_executable(name, path, exe_hash, exe_signed_by, exe_icon, exe_is_system):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-
-    now = datetime.datetime.now().isoformat()
-
-    print(f"Nouvel exécutable détecté : {name}")
-    cur.execute("""INSERT INTO exe_list (exe_name, exe_path, exe_program_name , exe_first_seen , exe_last_seen , exe_is_unknown,exe_is_watched ,exe_launched ,exe_is_dangerous ,exe_blocked, exe_hash, exe_signed_by, exe_icon, exe_is_system ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, ?, ?)""", (name, path, name, now, now, exe_hash, exe_signed_by, exe_icon, exe_is_system))
-    exe_id = cur.lastrowid
-
-    conn.commit()
-    conn.close()
-    return exe_id
+    db.init(get_db_path())
+    now = datetime.datetime.now()
+    
+    logger.info(f"Nouvel exécutable détecté : {name}")
+    exe = ExeList.create(
+        exe_name=name,
+        exe_path=path,
+        exe_program_name=name,
+        exe_first_seen=now,
+        exe_last_seen=now,
+        exe_is_unknown=False,
+        exe_is_watched=False,
+        exe_launched=False,
+        exe_is_dangerous=False,
+        exe_blocked=False,
+        exe_hash=exe_hash,
+        exe_signed_by=exe_signed_by,
+        exe_icon=exe_icon,
+        exe_is_system=exe_is_system
+    )
+    
+    return exe
 
 def update_executable(exe_id, name, path, exe_hash, exe_signed_by, exe_icon, exe_is_system):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-
-    now = datetime.datetime.now().isoformat()
-
-    cur.execute("""
-        UPDATE exe_list
-        SET exe_name=?, exe_path=?, exe_last_seen=?, exe_hash=?, exe_signed_by=?, exe_icon=?, exe_is_system=?
-        WHERE exe_id=?
-    """, (name, path, now, exe_hash, exe_signed_by, exe_icon, exe_is_system, exe_id))
-
-    conn.commit()
-    conn.close()
+    db.init(get_db_path())
+    now = datetime.datetime.now()
+    
+    ExeList.update(
+        exe_name=name,
+        exe_path=path,
+        exe_last_seen=now,
+        exe_hash=exe_hash,
+        exe_signed_by=exe_signed_by,
+        exe_icon=exe_icon,
+        exe_is_system=exe_is_system
+    ).where(ExeList.exe_id == exe_id).execute()
 
 def add_or_update_executable(name, path, exe_hash, exe_signed_by, exe_icon, exe_is_system):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-
-    cur.execute("SELECT exe_id FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
-    row = cur.fetchone()
-
-    now = datetime.datetime.now().isoformat()
-
-    if row:  # déjà connu → mise à jour
-
-        cur.execute("""
-            UPDATE exe_list
-            SET exe_last_seen=?, exe_hash=?, exe_signed_by=?, exe_icon=?, exe_is_system=?
-            WHERE exe_id=?
-        """, (now, exe_hash, exe_signed_by, exe_icon, exe_is_system, row[0]))
-        exe_id = row[0]
-    else:  # nouvel exe → insertion
-
-        print(f"Nouvel exécutable détecté : {name}")
-        cur.execute("""INSERT INTO exe_list (exe_name, exe_path, exe_program_name , exe_first_seen , exe_last_seen , exe_is_unknown,exe_is_watched ,exe_launched ,exe_is_dangerous ,exe_blocked, exe_hash, exe_signed_by, exe_icon, exe_is_system ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, ?, ?)""", (name, path, name, now, now, exe_hash, exe_signed_by, exe_icon, exe_is_system))
-        exe_id = cur.lastrowid
-
-    conn.commit()
-    conn.close()
+    db.init(get_db_path())
+    now = datetime.datetime.now()
+    
+    try:
+        exe = ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
+        exe.exe_last_seen = now
+        exe.exe_hash = exe_hash
+        exe.exe_signed_by = exe_signed_by
+        exe.exe_icon = exe_icon
+        exe.exe_is_system = exe_is_system
+        exe.save()
+        exe_id = exe.exe_id
+    except DoesNotExist:
+        logger.info(f"Nouvel exécutable détecté : {name}")
+        exe = ExeList.create(
+            exe_name=name,
+            exe_path=path,
+            exe_program_name=name,
+            exe_first_seen=now,
+            exe_last_seen=now,
+            exe_is_unknown=False,
+            exe_is_watched=False,
+            exe_launched=False,
+            exe_is_dangerous=False,
+            exe_blocked=False,
+            exe_hash=exe_hash,
+            exe_signed_by=exe_signed_by,
+            exe_icon=exe_icon,
+            exe_is_system=exe_is_system
+        )
+        exe_id = exe.exe_id
+    
     return exe_id
 
-#event_type: 0=STOP, 1=START, 2=KILL
 def add_event(exe_id, event_type):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute("""INSERT INTO exe_event (exe_id, eev_type, eev_timestamp) VALUES (?, ?, ?)""", (exe_id, event_type, datetime.datetime.now().isoformat()))
-    
-    cur.execute("SELECT * FROM exe_event WHERE eev_id = ?", (cur.lastrowid,))
-    row = cur.fetchone()
-    
-    conn.commit()
-    conn.close()
-
-    return row
+    db.init(get_db_path())
+    event = ExeEvent.create(
+        exe=exe_id,
+        eev_type=event_type,
+        eev_timestamp=datetime.datetime.now()
+    )
+    return event
 
 def set_executable_blocked(exe_id, blocked):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute("UPDATE exe_list SET exe_blocked=? WHERE exe_id=?", (blocked, exe_id))
-    conn.commit()
-    conn.close()
+    db.init(get_db_path())
+    ExeList.update(exe_blocked=blocked).where(ExeList.exe_id == exe_id).execute()
 
 def set_executable_dangerous(exe_id, dangerous):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute("UPDATE exe_list SET exe_is_dangerous=? WHERE exe_id=?", (dangerous, exe_id))
-    conn.commit()
-    conn.close()
+    db.init(get_db_path())
+    ExeList.update(exe_is_dangerous=dangerous).where(ExeList.exe_id == exe_id).execute()
 
 def set_executable_watched(exe_id, watched):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-    cur.execute("UPDATE exe_list SET exe_is_watched=? WHERE exe_id=?", (watched, exe_id))
-    conn.commit()
-    conn.close()
+    db.init(get_db_path())
+    ExeList.update(exe_is_watched=watched).where(ExeList.exe_id == exe_id).execute()
+
+def set_executable_watched_dangerous(exe_id):
+    db.init(get_db_path())
+    ExeList.update(exe_is_watched=True,exe_is_dangerous=True).where(ExeList.exe_id == exe_id).execute()
+    return ExeList.get(ExeList.exe_id == exe_id)
 
 def add_or_update_config(cfg_key, cfg_value):
-    conn = sqlite3.connect(get_db_path())
-    cur = conn.cursor()
-
-    cur.execute("SELECT cfg_id FROM config WHERE cfg_key=?", (cfg_key,))
-    row = cur.fetchone()
-
-    now = datetime.datetime.now().isoformat()
-
-    if row:  # déjà connu → mise à jour
-
-        cur.execute("""
-            UPDATE config
-            SET cfg_value=?, created=?
-            WHERE cfg_id=?
-        """, (cfg_value, now, row[0]))
-        cfg_id = row[0]
-    else:  # nouvel cfg → insertion
-
-        cur.execute("""INSERT INTO config (cfg_key, cfg_value, created) VALUES (?, ?, ?)""", (cfg_key, cfg_value, now))
-        cfg_id = cur.lastrowid
-
-    conn.commit()
-    conn.close()
+    db.init(get_db_path())
+    now = datetime.datetime.now()
+    
+    try:
+        config = Config.get(Config.cfg_key == cfg_key)
+        config.cfg_value = cfg_value
+        config.created = now
+        config.save()
+        cfg_id = config.cfg_id
+    except DoesNotExist:
+        config = Config.create(
+            cfg_key=cfg_key,
+            cfg_value=cfg_value,
+            created=now
+        )
+        cfg_id = config.cfg_id
+    
     return cfg_id

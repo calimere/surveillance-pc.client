@@ -10,7 +10,7 @@ def publish_executable_update(exe_id, exe_name, exe_path):
 
     publish("processus/[client]/update", json.dumps(payload))
 
-def publish_executable_add(exe_name, exe_path):
+def publish_executable_update(exe_list: ExeList):
     payload = {
         "exe_name": exe_name,
         "exe_path": exe_path,

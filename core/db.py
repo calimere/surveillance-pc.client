@@ -31,7 +31,11 @@ def init_db():
             exe_is_watched BOOLEAN NOT NULL DEFAULT 0,
             exe_launched BOOLEAN NOT NULL DEFAULT 0,
             exe_is_dangerous BOOLEAN NOT NULL DEFAULT 0,
-            exe_blocked BOOLEAN NOT NULL DEFAULT 0
+            exe_blocked BOOLEAN NOT NULL DEFAULT 0,
+            exe_icon BLOB,
+            exe_is_system BOOLEAN NOT NULL DEFAULT 0,
+            exe_hash TEXT,
+            exe_signed_by TEXT
         )
     """)
     
@@ -73,7 +77,8 @@ def get_all_exe():
         "exe_launched": exe_launched,
         "exe_is_unknown": exe_is_unknown,
         "exe_is_dangerous": exe_is_dangerous,
-        "exe_blocked": exe_blocked
+        "exe_blocked": exe_blocked,
+        
     }
     retour = [ExeListObj(*row) for row in rows]
 
@@ -169,27 +174,27 @@ def get_exe_by_name_path(name, path):
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
-    cur.execute("SELECT exe_id, exe_name, exe_path, exe_program_name, exe_first_seen, exe_last_seen, exe_is_unknown, exe_is_watched, exe_launched, exe_is_dangerous, exe_blocked FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
+    cur.execute("SELECT exe_id, exe_name, exe_path, exe_program_name, exe_first_seen, exe_last_seen, exe_is_unknown, exe_is_watched, exe_launched, exe_is_dangerous, exe_blocked, exe_hash, exe_signed_by, exe_icon, exe_is_system FROM exe_list WHERE exe_name=? AND exe_path=?", (name, path))
     row = cur.fetchone()
 
     conn.close()
     return row
 
-def add_executable(name, path, exe_hash, exe_signed_by):
+def add_executable(name, path, exe_hash, exe_signed_by, exe_icon, exe_is_system):
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
     now = datetime.datetime.now().isoformat()
 
     print(f"Nouvel exécutable détecté : {name}")
-    cur.execute("""INSERT INTO exe_list (exe_name, exe_path, exe_program_name , exe_first_seen , exe_last_seen , exe_is_unknown,exe_is_watched ,exe_launched ,exe_is_dangerous ,exe_blocked ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0)""", (name, path, name, now, now))
+    cur.execute("""INSERT INTO exe_list (exe_name, exe_path, exe_program_name , exe_first_seen , exe_last_seen , exe_is_unknown,exe_is_watched ,exe_launched ,exe_is_dangerous ,exe_blocked, exe_hash, exe_signed_by, exe_icon, exe_is_system ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, ?, ?)""", (name, path, name, now, now, exe_hash, exe_signed_by, exe_icon, exe_is_system))
     exe_id = cur.lastrowid
 
     conn.commit()
     conn.close()
     return exe_id
 
-def update_executable(exe_id, name, path):
+def update_executable(exe_id, name, path, exe_hash, exe_signed_by, exe_icon, exe_is_system):
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
@@ -197,14 +202,14 @@ def update_executable(exe_id, name, path):
 
     cur.execute("""
         UPDATE exe_list
-        SET exe_name=?, exe_path=?, exe_last_seen=?
+        SET exe_name=?, exe_path=?, exe_last_seen=?, exe_hash=?, exe_signed_by=?, exe_icon=?, exe_is_system=?
         WHERE exe_id=?
-    """, (name, path, now, exe_id))
+    """, (name, path, now, exe_hash, exe_signed_by, exe_icon, exe_is_system, exe_id))
 
     conn.commit()
     conn.close()
 
-def add_or_update_executable(name, path):
+def add_or_update_executable(name, path, exe_hash, exe_signed_by, exe_icon, exe_is_system):
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
@@ -217,14 +222,14 @@ def add_or_update_executable(name, path):
 
         cur.execute("""
             UPDATE exe_list
-            SET exe_last_seen=?
+            SET exe_last_seen=?, exe_hash=?, exe_signed_by=?, exe_icon=?, exe_is_system=?
             WHERE exe_id=?
-        """, (now, row[0]))
+        """, (now, exe_hash, exe_signed_by, exe_icon, exe_is_system, row[0]))
         exe_id = row[0]
     else:  # nouvel exe → insertion
 
         print(f"Nouvel exécutable détecté : {name}")
-        cur.execute("""INSERT INTO exe_list (exe_name, exe_path, exe_program_name , exe_first_seen , exe_last_seen , exe_is_unknown,exe_is_watched ,exe_launched ,exe_is_dangerous ,exe_blocked ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0)""", (name, path, name, now, now))
+        cur.execute("""INSERT INTO exe_list (exe_name, exe_path, exe_program_name , exe_first_seen , exe_last_seen , exe_is_unknown,exe_is_watched ,exe_launched ,exe_is_dangerous ,exe_blocked, exe_hash, exe_signed_by, exe_icon, exe_is_system ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, ?, ?)""", (name, path, name, now, now, exe_hash, exe_signed_by, exe_icon, exe_is_system))
         exe_id = cur.lastrowid
 
     conn.commit()

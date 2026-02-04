@@ -1,13 +1,13 @@
 import os
 import time
 from business.ESyncType import ESyncType
-from core.authentication import init_authentication
+#from core.authentication import init_authentication
 from core.db import get_known_blocked_processes, get_unknown_processes, get_known_watched_processes, init_db
 from core.running_processes import scan_running_processes
 from core.scan_exe import scan_exe
 from core.notification import send_discord_notification
 from core.config import config, get_pc_alias
-from core.mqtt_client import _generate_client_id, init_mqtt, publish, subscribe
+from core.mqtt_client import generate_client_id, init_mqtt, publish, subscribe
 from core.mqtt_handlers import handle_surveillance_cmd, handle_surveillance_ack
 
 print("Démarrage de la surveillance des exécutables...")
@@ -35,17 +35,15 @@ iterator = 0
 # # once authenticated
 # print("Client authentifié avec succès.")
 
-# initialize mqtt client
-init_mqtt()
 
-# subscribe to command and ack topics
-subscribe("surveillance/[client]/cmd", handle_surveillance_cmd)
-subscribe("surveillance/[client]/ack", handle_surveillance_ack)
-publish("surveillance/[client]/uptime")
+if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
+    init_mqtt() # initialize mqtt client
+    subscribe("surveillance/[client]/cmd", handle_surveillance_cmd)
+    subscribe("surveillance/[client]/ack", handle_surveillance_ack)
+    publish("surveillance/[client]/uptime")
 
 #finir la gestion des insertions en base des informations des exe
 #faire la synchro des exe avec le serveur distant
-#vérifier s'il faut faire une synchro avec le serveur distant en mqtt ou en http
 #stocker la dernière date de synchro sur le serveur distant
 #ajouter une vérification de synchro et récupérer la sauvegarde depuis le serveur distant si besoin
 #ajouter la possibilité de fermer un processus à distance via mqtt

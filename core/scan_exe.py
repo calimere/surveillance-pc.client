@@ -1,12 +1,10 @@
 import os
-
-from yarg import get
-
 from core.db import add_executable, add_or_update_executable, get_all_exe, get_exe_by_name_path, update_executable
 from core.mqtt_publish import publish_executable_add, publish_executable_update
 import win32api
 import win32con
 import win32ui
+import win32gui
 import pefile
 import hashlib
 
@@ -41,7 +39,6 @@ common_dirs = [
     r"C:\Program Files\WindowsApps",
 ]
 
-
 # Expansion de la variable d'environnement %USERNAME%
 common_dirs = [os.path.expandvars(d) for d in common_dirs]
 
@@ -66,16 +63,19 @@ def scan_exe(avoid_scan_windows_folder=True):
 
         e = get_exe_by_name_path(exe_name, exe_path)
         if e is None:
-            publish_executable_add(exe_name, exe_path)
-            add_executable(exe_name, exe_path)
+            #publish_executable_add(exe_name, exe_path)
+            add_executable(exe_name, exe_path, exe_hash, exe_signed_by, exe_icon, exe_is_system)
         else:
-            if e[1] != exe_name or e[2] != exe_path:
-                publish_executable_update(e[0], exe_name, exe_path)
-                update_executable(e[0], exe_name, exe_path)
+            print("exécutable existant :", exe_name)
+            if e.exe_hash != exe_hash or e.exe_signed_by != exe_signed_by:
+                print("L'exécutable a changé :", exe_name)
+                #vérifier si le hash ou la signature a changé
+                #générer une alerte si c'est le cas
+            
 
 def get_exe_icon(file_path):
     try:
-        large, small = win32api.ExtractIconEx(file_path, 0)
+        large, _ = win32gui.ExtractIconEx(file_path, 0)
         if large:
             icon = large[0]
             hdc = win32ui.CreateDCFromHandle(win32ui.GetDC(0))
@@ -130,9 +130,10 @@ def get_exe_signature(file_path):
     """
     try:
         pe = pefile.PE(file_path)
-        for entry in pe.DIRECTORY_ENTRY_SECURITY:
-            if entry.name == b"Authenticode":
-                return entry.cert
+        if hasattr(pe, 'DIRECTORY_ENTRY_SECURITY'):
+            for entry in pe.DIRECTORY_ENTRY_SECURITY:
+                if entry.name == b"Authenticode":
+                    return entry.cert
     except Exception as e:
         print(f"Erreur lors de la récupération de la signature pour {file_path}: {e}")
     return None

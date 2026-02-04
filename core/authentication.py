@@ -1,8 +1,8 @@
 import uuid
-from config import get_api_url, get_db_path, get_pc_alias
-from dbm import sqlite3
+from core.config import get_api_url, get_db_path, get_pc_alias
+import sqlite3
 
-from db import add_or_update_config
+from core.db import add_or_update_config
 
 
 # je récupère le token du client dans la db locale
@@ -47,7 +47,7 @@ def get_client_id():
     conn = sqlite3.connect(get_db_path())
     cur = conn.cursor()
 
-    cur.execute("SELECT cfg_value FROM config WHERE cfg_key=client_id")
+    cur.execute("SELECT cfg_value FROM config WHERE cfg_key='client_id'")
     row = cur.fetchone()
 
     conn.close()

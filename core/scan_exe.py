@@ -1,12 +1,14 @@
 import os
-from core.db import add_executable, add_or_update_executable, get_all_exe, get_exe_by_name_path, update_executable
-from core.mqtt_publish import publish_executable_add, publish_executable_update
-import win32api
-import win32con
+from business import EExeEventType
+from core.db import add_executable, add_notification, get_exe_by_name_path, set_executable_watched_dangerous
+from core.mqtt_publish import publish_executable_add, publish_executable_event, publish_executable_event, publish_executable_update, publish_notification
 import win32ui
 import win32gui
 import pefile
 import hashlib
+from core.logger import get_logger
+
+logger = get_logger("scan_exe")
 
 def find_exe_files(start_dirs):
     exe_files = []
@@ -45,11 +47,11 @@ common_dirs = [os.path.expandvars(d) for d in common_dirs]
 first_scan_done = False
 def scan_exe(avoid_scan_windows_folder=True):
     global first_scan_done
-    print("Scan des fichiers .exe...")
+    logger.info("Scan des fichiers .exe...")
     exe_files = find_exe_files(common_dirs)
 
     if not first_scan_done and not avoid_scan_windows_folder:
-        print("Scan du dossier Windows (premier scan)...")
+        logger.info("Scan du dossier Windows (premier scan)...")
         find_exe_files([r"C:\Windows"])
         first_scan_done = True
 
@@ -63,16 +65,18 @@ def scan_exe(avoid_scan_windows_folder=True):
 
         e = get_exe_by_name_path(exe_name, exe_path)
         if e is None:
-            #publish_executable_add(exe_name, exe_path)
-            add_executable(exe_name, exe_path, exe_hash, exe_signed_by, exe_icon, exe_is_system)
+            exe = add_executable(exe_name, exe_path, exe_hash, exe_signed_by, exe_icon, exe_is_system)
+            publish_executable_add(exe)
         else:
-            print("exécutable existant :", exe_name)
+            logger.debug(f"Exécutable existant : {exe_name}")
             if e.exe_hash != exe_hash or e.exe_signed_by != exe_signed_by:
-                print("L'exécutable a changé :", exe_name)
-                #vérifier si le hash ou la signature a changé
-                #générer une alerte si c'est le cas
+                logger.warning(f"L'exécutable a changé : {exe_name}")
+                publish_executable_event(e.exe_id, EExeEventType.HASH_CHANGE if e.exe_hash != exe_hash else EExeEventType.SIGNATURE_CHANGE)
+                publish_notification(e.exe_id, f"L'exécutable '{exe_name}' a changé. Nouveau hash ou signature détecté.")
+                notification = add_notification(e.exe_id, f"L'exécutable '{exe_name}' a changé. Nouveau hash ou signature détecté.")
+                exe = set_executable_watched_dangerous(e.exe_id)
+                publish_executable_update(exe)
             
-
 def get_exe_icon(file_path):
     try:
         large, _ = win32gui.ExtractIconEx(file_path, 0)
@@ -85,7 +89,7 @@ def get_exe_icon(file_path):
             hdc.DrawIcon((0, 0), icon)
             return bmp
     except Exception as e:
-        print(f"Erreur lors de la récupération de l'icône pour {file_path}: {e}")
+        logger.error(f"Erreur lors de la récupération de l'icône pour {file_path}: {e}")
     return None
 
 def get_exe_hash(file_path):
@@ -106,7 +110,7 @@ def get_exe_hash(file_path):
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
     except Exception as e:
-        print(f"Erreur lors de la génération du hash pour {file_path}: {e}")
+        logger.error(f"Erreur lors de la génération du hash pour {file_path}: {e}")
     return None
 
 def get_exe_signature(file_path):
@@ -135,5 +139,5 @@ def get_exe_signature(file_path):
                 if entry.name == b"Authenticode":
                     return entry.cert
     except Exception as e:
-        print(f"Erreur lors de la récupération de la signature pour {file_path}: {e}")
+        logger.error(f"Erreur lors de la récupération de la signature pour {file_path}: {e}")
     return None

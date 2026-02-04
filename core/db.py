@@ -51,16 +51,6 @@ class Config(BaseModel):
     class Meta:
         table_name = 'config'
 
-class Notification(BaseModel):
-    ntf_id = AutoField(primary_key=True)
-    ntf_type = TextField() # type of alarm (e.g., "exe_launched", "exe_blocked", "hash_changed", etc.)
-    ntf_message = TextField() # JSON data related to the alarm
-    created = DateTimeField(default=datetime.datetime.now)
-    exe_id = IntegerField(null=True)
-
-    class Meta:
-        table_name = 'notification'
-
 class Queue(BaseModel):
     que_id = AutoField(primary_key=True)
     que_type = TextField() # type of item to process (e.g., "exe_event", "exe_list", "alarms", etc.)
@@ -84,7 +74,7 @@ def init_db():
     
     db.init(get_db_path())
     db.connect()
-    db.create_tables([ExeList, ExeEvent, Config, Notification, Queue])
+    db.create_tables([ExeList, ExeEvent, Config, Queue])
     db.close()
     
     logger.info(f"Base de données créée à {get_db_path()}.")
@@ -135,6 +125,10 @@ def get_all_events():
         "eev_timestamp": event.eev_timestamp
     } for event in query]
 
+def get_running_processes():
+    db.init(get_db_path())
+    return ExeList.select().where(ExeList.exe_launched == True)
+
 def get_known_watched_processes():
     db.init(get_db_path())
     return ExeList.select().where((ExeList.exe_is_watched == True) & (ExeList.exe_is_unknown == False))
@@ -149,13 +143,14 @@ def get_unknown_processes():
 
 def update_launched_status(exe_id, launched):
     db.init(get_db_path())
-    ExeList.update(exe_launched=launched).where(ExeList.exe_id == exe_id).execute()
+    if ExeList.update(exe_launched=launched).where(ExeList.exe_id == exe_id).execute() == 1:
+        return ExeList.get(ExeList.exe_id == exe_id)
 
 def get_process_by_name(name, path):
     db.init(get_db_path())
     try:
         exe = ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
-        return exe.exe_id
+        return exe
     except DoesNotExist:
         return None
 
@@ -167,9 +162,7 @@ def add_or_update_unknown_executable(name, path):
         exe = ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
         exe.exe_last_seen = now
         exe.save()
-        exe_id = exe.exe_id
     except DoesNotExist:
-        logger.info(f"Nouvel exécutable inconnu détecté : {name}")
         exe = ExeList.create(
             exe_name=name,
             exe_path=path,
@@ -182,9 +175,8 @@ def add_or_update_unknown_executable(name, path):
             exe_is_dangerous=False,
             exe_blocked=False
         )
-        exe_id = exe.exe_id
     
-    return exe_id
+    return exe
 
 def get_exe_by_name_path(name, path):
     db.init(get_db_path())

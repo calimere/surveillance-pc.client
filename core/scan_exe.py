@@ -26,17 +26,17 @@ common_dirs = [
     r"C:\Users\%USERNAME%\AppData",
     # Steam
     r"C:\Program Files (x86)\Steam\steamapps\common",
-    r"D:\SteamLibrary\steamapps\common",  # Chemin alternatif courant
+    r"C:\SteamLibrary\steamapps\common",  # Chemin alternatif courant
     # Epic Games
     r"C:\Program Files\Epic Games",
-    r"D:\Epic Games",  # Chemin alternatif courant
+    r"C:\Epic Games",  # Chemin alternatif courant
     # Ubisoft Connect
     r"C:\Program Files (x86)\Ubisoft\Ubisoft Game Launcher\games",
-    r"D:\Ubisoft\games",  # Chemin alternatif courant
+    r"C:\Ubisoft\games",  # Chemin alternatif courant
     # Battle.net (Blizzard)
     r"C:\Program Files (x86)\Battle.net",
     r"C:\Program Files (x86)\Blizzard Entertainment",
-    r"D:\Battle.net",  # Chemin alternatif courant
+    r"C:\Battle.net",  # Chemin alternatif courant
     # Microsoft Store (jeux installés via WindowsApps)
     r"C:\Program Files\WindowsApps",
 ]
@@ -73,7 +73,6 @@ def scan_exe(avoid_scan_windows_folder=True):
                 logger.warning(f"L'exécutable a changé : {exe_name}")
                 publish_executable_event(e.exe_id, EExeEventType.HASH_CHANGE if e.exe_hash != exe_hash else EExeEventType.SIGNATURE_CHANGE)
                 publish_notification(e.exe_id, f"L'exécutable '{exe_name}' a changé. Nouveau hash ou signature détecté.")
-                notification = add_notification(e.exe_id, f"L'exécutable '{exe_name}' a changé. Nouveau hash ou signature détecté.")
                 exe = set_executable_watched_dangerous(e.exe_id)
                 publish_executable_update(exe)
             

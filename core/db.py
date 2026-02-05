@@ -7,40 +7,69 @@ from core.logger import get_logger
 
 logger = get_logger("db")
 
-db = SqliteDatabase(None)
+# Configuration SQLite pour éviter les locks
+db = SqliteDatabase(
+    None,
+    pragmas={
+        'journal_mode': 'wal',  # Write-Ahead Logging pour meilleure concurrence
+        'cache_size': -1 * 64000,  # 64MB de cache
+        'foreign_keys': 1,
+        'ignore_check_constraints': 0,
+        'synchronous': 0  # Plus rapide mais moins sûr (acceptable pour logs)
+    },
+    timeout=30  # Timeout de 30 secondes au lieu de 5 par défaut
+)
 
 class BaseModel(Model):
     class Meta:
         database = db
 
-class ExeList(BaseModel):
-    exe_id = AutoField(primary_key=True)
-    exe_name = TextField()
-    exe_path = TextField()
-    exe_program_name = TextField()
-    exe_first_seen = DateTimeField()
-    exe_last_seen = DateTimeField()
-    exe_is_unknown = BooleanField(default=False)
-    exe_is_watched = BooleanField(default=False)
-    exe_launched = BooleanField(default=False)
-    exe_is_dangerous = BooleanField(default=False)
-    exe_blocked = BooleanField(default=False)
-    exe_icon = BlobField(null=True)
-    exe_is_system = BooleanField(default=False)
-    exe_hash = TextField(null=True)
-    exe_signed_by = TextField(null=True)
+class Process(BaseModel):
+    prc_id = AutoField(primary_key=True)
+    prc_name = TextField()
+    prc_path = TextField()
+    prc_program_name = TextField()
+    prc_first_seen = DateTimeField()
+    prc_is_unknown = BooleanField(default=False)
+    prc_is_watched = BooleanField(default=False)
+    prc_is_dangerous = BooleanField(default=False)
+    prc_blocked = BooleanField(default=False)
 
     class Meta:
-        table_name = 'exe_list'
+        table_name = 'process'
 
-class ExeEvent(BaseModel):
-    eev_id = AutoField(primary_key=True)
-    exe = ForeignKeyField(ExeList, backref='events', column_name='exe_id')
-    eev_type = TextField()
-    eev_timestamp = DateTimeField()
+class ProcessInstance(BaseModel):
+    pri_id = AutoField(primary_key=True)
+    prc_id = ForeignKeyField(Process, column_name='prc_id')
+    pri_timestamp = DateTimeField()
+    pri_pid =IntegerField()
+    pri_ppid = IntegerField()
+    pri_start_time = DateTimeField()
+    pri_owner = TextField()
+    pri_has_window = BooleanField(default=False)
+    pri_signed = BooleanField(default=False)
+    pri_signed_by = TextField(null=True)
+    pri_signed_thumbprint = TextField(null=True)
+    pri_signed_is_ev = BooleanField(default=False)
+
+    pri_weird_path = BooleanField(default=False)
+    pri_is_running = BooleanField(default=True)
+    pri_score = IntegerField(default=0) #100 = très suspect, 0 = pas de suspicion particulière
+    pri_score_computed = BooleanField(default=False) #indique si le score a déjà été calculé pour cette instance ou s'il doit être recalculé (ex: après une mise à jour du processus en "watched" ou "dangerous")
+    
+    pri_populated = BooleanField(default=False) #indique si les données de cette instance ont déjà été utilisées pour le calcul du score de ses enfants (pour éviter de prendre en compte plusieurs fois la même instance dans le calcul du score des enfants)
 
     class Meta:
-        table_name = 'exe_event'
+        table_name = 'process_instance'
+
+class ProcessEvent(BaseModel):
+    pev_id = AutoField(primary_key=True)
+    pri_id = ForeignKeyField(ProcessInstance, column_name='pri_id')
+    pev_type = TextField()
+    pev_timestamp = DateTimeField()
+
+    class Meta:
+        table_name = 'process_event'
 
 class Config(BaseModel):
     cfg_id = AutoField(primary_key=True)
@@ -60,6 +89,8 @@ class Queue(BaseModel):
     class Meta:
         table_name = 'queue'
 
+#------------------------------------------------------------------#
+
 def init_db():
     logger.info("Initialisation de la base de données...")
     logger.debug(f"Vérification de l'existence de la base de données à {get_db_path()}...")
@@ -74,20 +105,10 @@ def init_db():
     
     db.init(get_db_path())
     db.connect()
-    db.create_tables([ExeList, ExeEvent, Config, Queue])
-    db.close()
+    db.create_tables([Process, ProcessInstance, ProcessEvent, Config, Queue])
+    # Ne pas fermer la connexion ici - elle sera réutilisée
     
     logger.info(f"Base de données créée à {get_db_path()}.")
-
-def add_notification(alarm_type, message, exe_id=None):
-    db.init(get_db_path())
-    notification = Notification.create(
-        ntf_type=alarm_type,
-        ntf_message=message,
-        exe_id=exe_id,
-        created=datetime.datetime.now()
-    )
-    return notification
 
 def add_queue(queue_type, queue_data):
     db.init(get_db_path())
@@ -98,191 +119,187 @@ def add_queue(queue_type, queue_data):
     )
     return queue_item
 
-def get_all_exe():
-    db.init(get_db_path())
-    query = ExeList.select(ExeList.exe_name, ExeList.exe_path, ExeList.exe_id, 
-                            ExeList.exe_launched, ExeList.exe_is_unknown, 
-                            ExeList.exe_is_dangerous, ExeList.exe_blocked)
-    
-    return [{
-        "exe_name": exe.exe_name,
-        "exe_path": exe.exe_path,
-        "exe_id": exe.exe_id,
-        "exe_launched": exe.exe_launched,
-        "exe_is_unknown": exe.exe_is_unknown,
-        "exe_is_dangerous": exe.exe_is_dangerous,
-        "exe_blocked": exe.exe_blocked,
-    } for exe in query]
-
-def get_all_events():
-    db.init(get_db_path())
-    query = ExeEvent.select()
-    
-    return [{
-        "eev_id": event.eev_id,
-        "exe_id": event.exe_id,
-        "eev_type": event.eev_type,
-        "eev_timestamp": event.eev_timestamp
-    } for event in query]
-
 def get_running_processes():
     db.init(get_db_path())
-    return ExeList.select().where(ExeList.exe_launched == True)
+    return Process.select().where(Process.prc_is_running == True)
 
 def get_known_watched_processes():
     db.init(get_db_path())
-    return ExeList.select().where((ExeList.exe_is_watched == True) & (ExeList.exe_is_unknown == False))
+    return Process.select().where((Process.prc_is_watched == True) & (Process.prc_is_unknown == False))
 
 def get_known_blocked_processes():
     db.init(get_db_path())
-    return ExeList.select().where((ExeList.exe_blocked == True) & (ExeList.exe_is_unknown == False))
+    return Process.select().where((Process.prc_is_dangerous == True) & (Process.prc_is_unknown == False))
 
 def get_unknown_processes():
     db.init(get_db_path())
-    return ExeList.select().where(ExeList.exe_is_unknown == True)
+    return Process.select().where(Process.prc_is_unknown == True)
 
 def update_launched_status(exe_id, launched):
     db.init(get_db_path())
-    if ExeList.update(exe_launched=launched).where(ExeList.exe_id == exe_id).execute() == 1:
-        return ExeList.get(ExeList.exe_id == exe_id)
+    if Process.update(prc_is_running=launched).where(Process.prc_id == exe_id).execute() == 1:
+        return Process.get(Process.prc_id == exe_id)
 
+def get_process_by_id(prc_id):
+    db.init(get_db_path())
+    try:
+        prc = Process.get(Process.prc_id == prc_id)
+        return prc
+    except DoesNotExist:
+        return None
+    
 def get_process_by_name(name, path):
     db.init(get_db_path())
     try:
-        exe = ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
-        return exe
+        prc = Process.get((Process.prc_name == name) & (Process.prc_path == path))
+        return prc
     except DoesNotExist:
         return None
 
-def add_or_update_unknown_executable(name, path):
+def add_process(name, path):
     db.init(get_db_path())
     now = datetime.datetime.now()
     
-    try:
-        exe = ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
-        exe.exe_last_seen = now
-        exe.save()
-    except DoesNotExist:
-        exe = ExeList.create(
-            exe_name=name,
-            exe_path=path,
-            exe_program_name=name,
-            exe_first_seen=now,
-            exe_last_seen=now,
-            exe_is_unknown=True,
-            exe_is_watched=True,
-            exe_launched=False,
-            exe_is_dangerous=False,
-            exe_blocked=False
-        )
+    prc = Process.create(
+        prc_name=name,
+        prc_path=path,
+        prc_program_name=name,
+        prc_first_seen=now,
+        prc_is_unknown=False,
+        prc_is_watched=False,
+        prc_is_running=False,
+        prc_is_dangerous=False,
+        prc_blocked=False,
+    )
     
-    return exe
+    return prc
 
-def get_exe_by_name_path(name, path):
+def add_event(pri_id, pev_type, pev_timestamp):
+    db.init(get_db_path())
+    
+    # Retry logic pour gérer les locks temporaires
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            event = ProcessEvent.create(
+                pri_id=pri_id,
+                pev_type=pev_type.value if hasattr(pev_type, 'value') else str(pev_type),
+                pev_timestamp=pev_timestamp
+            )
+            return event
+        except OperationalError as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database locked, retry {attempt + 1}/{max_retries}")
+                import time
+                time.sleep(0.1 * (attempt + 1))  # Backoff exponentiel
+            else:
+                logger.error(f"Failed to add event after {max_retries} attempts: {e}")
+                raise
+
+def add_events_batch(events_data):
+    """Ajoute plusieurs événements en une seule transaction pour de meilleures performances.
+    
+    Args:
+        events_data: Liste de dicts avec les clés: pri_id, pev_type, pev_timestamp
+    """
+    db.init(get_db_path())
+    
+    if not events_data:
+        return
+    
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with db.atomic():
+                ProcessEvent.insert_many(events_data).execute()
+            return
+        except OperationalError as e:
+            if attempt < max_retries - 1:
+                logger.warning(f"Database locked during batch insert, retry {attempt + 1}/{max_retries}")
+                import time
+                time.sleep(0.1 * (attempt + 1))
+            else:
+                logger.error(f"Failed to batch insert events after {max_retries} attempts: {e}")
+                raise
+
+def set_process_blocked(prc_id, blocked):
+    db.init(get_db_path())
+    Process.update(prc_blocked=blocked).where(Process.prc_id == prc_id).execute()
+
+def set_process_dangerous(prc_id, dangerous):
+    db.init(get_db_path())
+    Process.update(prc_is_dangerous=dangerous).where(Process.prc_id == prc_id).execute()
+
+def set_process_watched(prc_id, watched):
+    db.init(get_db_path())
+    Process.update(prc_is_watched=watched).where(Process.prc_id == prc_id).execute()
+
+def set_process_watched_dangerous(prc_id):
+    db.init(get_db_path())
+    Process.update(prc_is_watched=True, prc_is_dangerous=True).where(Process.prc_id == prc_id).execute()
+    return Process.get(Process.prc_id == prc_id)
+
+def get_non_populate_process_instance():
+    db.init(get_db_path())
+    return ProcessInstance.select().where(ProcessInstance.pri_populated == False)
+
+def set_process_instance_populated(instance_id, signed_by, signed_thumbprint, signed_is_ev, owner):
+    db.init(get_db_path())
+    ProcessInstance.update(
+        pri_signed_by=signed_by,
+        pri_signed_thumbprint=signed_thumbprint,
+        pri_signed_is_ev=signed_is_ev,
+        pri_owner=owner,
+        pri_populated=True
+    ).where(ProcessInstance.pri_id == instance_id).execute()
+    
+def add_process_instance(prc_id, pri_timestamp, pri_pid, pri_ppid, pri_start_time,  pri_has_window, pri_weird_path):
+    pri = ProcessInstance.create(
+        prc_id=prc_id,
+        pri_timestamp=pri_timestamp,
+        pri_pid=pri_pid,
+        pri_ppid=pri_ppid,
+        pri_start_time=pri_start_time,
+        pri_owner="",
+        pri_has_window=pri_has_window,
+        pri_signed=False,
+        pri_signed_by="",
+        pri_signed_thumbprint="",
+        pri_signed_is_ev=False,
+        pri_weird_path=pri_weird_path,
+        pri_is_running=True,
+        pri_score=0,
+        pri_score_computed=False,
+        pri_populated=False
+    )
+    return pri
+
+def get_not_compute_process_instance():
+    db.init(get_db_path())
+    return ProcessInstance.select().where(ProcessInstance.pri_score_computed == False)
+
+def update_process_instance_score(pri_id, score):
+    db.init(get_db_path())
+    ProcessInstance.update(pri_score=score, pri_score_computed=True).where(ProcessInstance.pri_id == pri_id).execute()
+    
+def get_process_instance_by_pid(pid, start_time):
     db.init(get_db_path())
     try:
-        return ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
+        return ProcessInstance.get((ProcessInstance.pri_pid == pid) & (ProcessInstance.pri_start_time == start_time))
     except DoesNotExist:
         return None
-
-def add_executable(name, path, exe_hash, exe_signed_by, exe_icon, exe_is_system):
-    db.init(get_db_path())
-    now = datetime.datetime.now()
     
-    logger.info(f"Nouvel exécutable détecté : {name}")
-    exe = ExeList.create(
-        exe_name=name,
-        exe_path=path,
-        exe_program_name=name,
-        exe_first_seen=now,
-        exe_last_seen=now,
-        exe_is_unknown=False,
-        exe_is_watched=False,
-        exe_launched=False,
-        exe_is_dangerous=False,
-        exe_blocked=False,
-        exe_hash=exe_hash,
-        exe_signed_by=exe_signed_by,
-        exe_icon=exe_icon,
-        exe_is_system=exe_is_system
-    )
-    
-    return exe
-
-def update_executable(exe_id, name, path, exe_hash, exe_signed_by, exe_icon, exe_is_system):
+def stop_process_instance(pri_id):
     db.init(get_db_path())
-    now = datetime.datetime.now()
-    
-    ExeList.update(
-        exe_name=name,
-        exe_path=path,
-        exe_last_seen=now,
-        exe_hash=exe_hash,
-        exe_signed_by=exe_signed_by,
-        exe_icon=exe_icon,
-        exe_is_system=exe_is_system
-    ).where(ExeList.exe_id == exe_id).execute()
+    ProcessInstance.update(pri_is_running=False).where(ProcessInstance.pri_id == pri_id).execute()
 
-def add_or_update_executable(name, path, exe_hash, exe_signed_by, exe_icon, exe_is_system):
+def get_running_instances_without_score():
     db.init(get_db_path())
-    now = datetime.datetime.now()
-    
-    try:
-        exe = ExeList.get((ExeList.exe_name == name) & (ExeList.exe_path == path))
-        exe.exe_last_seen = now
-        exe.exe_hash = exe_hash
-        exe.exe_signed_by = exe_signed_by
-        exe.exe_icon = exe_icon
-        exe.exe_is_system = exe_is_system
-        exe.save()
-        exe_id = exe.exe_id
-    except DoesNotExist:
-        logger.info(f"Nouvel exécutable détecté : {name}")
-        exe = ExeList.create(
-            exe_name=name,
-            exe_path=path,
-            exe_program_name=name,
-            exe_first_seen=now,
-            exe_last_seen=now,
-            exe_is_unknown=False,
-            exe_is_watched=False,
-            exe_launched=False,
-            exe_is_dangerous=False,
-            exe_blocked=False,
-            exe_hash=exe_hash,
-            exe_signed_by=exe_signed_by,
-            exe_icon=exe_icon,
-            exe_is_system=exe_is_system
-        )
-        exe_id = exe.exe_id
-    
-    return exe_id
+    return ProcessInstance.select().where((ProcessInstance.pri_is_running == True) & (ProcessInstance.pri_score_computed == False))
 
-def add_event(exe_id, event_type):
+def get_running_instances():
     db.init(get_db_path())
-    event = ExeEvent.create(
-        exe=exe_id,
-        eev_type=event_type,
-        eev_timestamp=datetime.datetime.now()
-    )
-    return event
-
-def set_executable_blocked(exe_id, blocked):
-    db.init(get_db_path())
-    ExeList.update(exe_blocked=blocked).where(ExeList.exe_id == exe_id).execute()
-
-def set_executable_dangerous(exe_id, dangerous):
-    db.init(get_db_path())
-    ExeList.update(exe_is_dangerous=dangerous).where(ExeList.exe_id == exe_id).execute()
-
-def set_executable_watched(exe_id, watched):
-    db.init(get_db_path())
-    ExeList.update(exe_is_watched=watched).where(ExeList.exe_id == exe_id).execute()
-
-def set_executable_watched_dangerous(exe_id):
-    db.init(get_db_path())
-    ExeList.update(exe_is_watched=True,exe_is_dangerous=True).where(ExeList.exe_id == exe_id).execute()
-    return ExeList.get(ExeList.exe_id == exe_id)
+    return ProcessInstance.select().where((ProcessInstance.pri_is_running == True))
 
 def add_or_update_config(cfg_key, cfg_value):
     db.init(get_db_path())

@@ -1,7 +1,7 @@
 import time
 #from core.authentication import init_authentication
 from core.db import init_db
-from core.running_processes import scan_running_processes
+from core.running_processes import compute_running_processes_scores, compute_scores, populate_instances, scan_running_processes
 from core.notification import send_discord_notification
 from core.config import config, get_pc_alias
 from core.mqtt_client import generate_client_id, init_mqtt, publish, subscribe
@@ -48,6 +48,12 @@ if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
 # main loop
 while(True):
 
-    scan_running_processes()
     publish("surveillance/[client]/uptime")
+    scan_running_processes()
+    time.sleep(1)
+    populate_instances()
+    
     time.sleep(5)
+    compute_running_processes_scores()
+    time.sleep(1)
+    compute_scores()

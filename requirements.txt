@@ -6,3 +6,5 @@ psutil
 pyinstaller
 configparser
 peewee
+wmi
+pefile

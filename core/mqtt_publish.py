@@ -1,7 +1,7 @@
 from datetime import datetime
 from business.EAlarmType import EQueueType
 from business.EExeEventType import EExeEventType
-from core.db import ExeList, add_queue
+from core.db import Process, add_queue
 from core.mqtt_client import MQTTStatus, get_mqtt_status, publish
 import json
 from core.logger import get_logger
@@ -24,7 +24,7 @@ def publish_executable_event(exe_id: int, event_type: EExeEventType):
     }
     base_publish(EQueueType.EXE_EVENT_ADD,"processus/[client]/event", payload)
 
-def publish_executable_add(exe_list: ExeList):
+def publish_executable_add(exe_list: Process):
     payload = {
         "exe_list": exe_list.__dict__,
         "timestamp": serialize_date(datetime.now())
@@ -32,7 +32,7 @@ def publish_executable_add(exe_list: ExeList):
 
     base_publish(EQueueType.EXE_LIST_ADD,"processus/[client]/add", payload)
 
-def publish_executable_update(exe_list: ExeList):
+def publish_executable_update(exe_list: Process):
     payload = {
         "exe_list": exe_list.__dict__,
         "timestamp": serialize_date(datetime.now())

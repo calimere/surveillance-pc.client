@@ -32,7 +32,7 @@ def populate_instance(instance):
     signed_thumbprint = signer["thumbprint"] if signer else ""
     signed_is_ev = signer["is_ev"] if signer else False
     
-    set_process_instance_populated(instance.id, signed_by, signed_thumbprint, signed_is_ev, owner)
+    set_process_instance_populated(instance.pri_id, signed_by, signed_thumbprint, signed_is_ev, owner)
 
 def handle_new_instance(proc, ppid, process, visible_pids):
     pid = proc.pid

@@ -7,6 +7,7 @@ from core.business.db import (
     add_events_batch,
     add_process,
     add_process_instance,
+    add_queue,
     get_non_populate_process_instance,
     get_not_compute_process_instance,
     get_process_by_id,
@@ -18,11 +19,6 @@ from core.business.db import (
     set_process_instance_populated,
     stop_process_instance,
     update_process_instance_score,
-)
-from core.business.mqtt_publish import (
-    publish_executable_add,
-    publish_executable_event,
-    publish_notification,
 )
 from core.component.logger import get_logger
 from core.business.process import (
@@ -88,19 +84,12 @@ def handle_new_instances(new_instances, visible_pids):
             add_event(
                 process_instance.pri_id, EExeEventType.START, datetime.datetime.now()
             )
+            # ajout dans la queue pour notifier les clients en temps réel de la nouvelle instance (MQTT ou API)
+
         except Exception as e:
             logger.error(
                 f"Erreur lors du traitement de la nouvelle instance PID={proc.pid}: {e}"
             )
-
-    if len(new_instances) > 10:
-        logger.info(
-            f"{len(new_instances)} nouvelles instances traitées, ajout en masse via l'API"
-        )
-    else:
-        logger.info(
-            f"{len(new_instances)} nouvelles instances traitées, ajout via MQTT"
-        )
 
 
 def scan_running_processes():

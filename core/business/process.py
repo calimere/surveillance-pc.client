@@ -1,12 +1,13 @@
-import win32com
 import win32gui
 import win32process
 import wmi
-import win32api
 import os
 import subprocess
 
-#1️⃣ Fenêtres visibles (process principaux)
+c = wmi.WMI()
+
+
+# 1️⃣ Fenêtres visibles (process principaux)
 def get_visible_window_pids():
     pids = set()
 
@@ -19,11 +20,12 @@ def get_visible_window_pids():
     win32gui.EnumWindows(callback, None)
     return pids
 
-#2️⃣ PPID + owner via WMI (optimisé)
+
+# 2️⃣ PPID + owner via WMI (optimisé)
 def get_wmi_process_info():
     info = {}
     # Récupération en une seule requête avec les propriétés nécessaires uniquement
-    for p in c.Win32_Process(['ProcessId', 'ParentProcessId', 'Name']):
+    for p in c.Win32_Process(["ProcessId", "ParentProcessId", "Name"]):
         pid = int(p.ProcessId)
         ppid = int(p.ParentProcessId) if p.ParentProcessId else 0
         owner = None
@@ -31,28 +33,23 @@ def get_wmi_process_info():
             owner = p.GetOwner()[2]
         except:
             pass
-        info[pid] = {
-            "ppid": ppid,
-            "owner": owner
-        }
+        info[pid] = {"ppid": ppid, "owner": owner}
     return info
 
-c = wmi.WMI()
+
 def get_owner_for_pid(pid):
     for p in c.Win32_Process(ProcessId=pid):
         try:
             return p.GetOwner()[2]
         except:
             return None
-        
-#3️⃣ Signataire d'un fichier
+
+
+# 3️⃣ Signataire d'un fichier
 def get_file_signer(path):
-    
-    if not path:
+    if not path or not os.path.exists(path):
         return None
-    
-    if not os.path.exists(path):
-        return None
+
     try:
         ps_command = f"""
         $sig = Get-AuthenticodeSignature "{path}"
@@ -63,26 +60,37 @@ def get_file_signer(path):
             Write-Output "$subject|$thumb|$ev"
         }}
         """
-        result = subprocess.run(['powershell', '-Command', ps_command],
-                                capture_output=True, text=True, timeout=5)
+
+        result = subprocess.run(
+            ["powershell", "-Command", ps_command],
+            capture_output=True,
+            text=True,
+            encoding="utf-16-le",  # ✅ important
+            errors="replace",
+            timeout=5,
+        )
+
         out = result.stdout.strip()
         if out:
-            subject, thumbprint, is_ev = out.split('|')
+            subject, thumbprint, is_ev = out.split("|")
             return {
                 "subject": subject,
                 "thumbprint": thumbprint,
-                "is_ev": is_ev == 'True'
+                "is_ev": is_ev == "True",
             }
+
         return None
+
     except Exception:
         return None
 
-#chemin d'accès "bizarre" : souvent les malwares se cachent dans des dossiers temporaires, de téléchargement ou sur le bureau
+
+# chemin d'accès "bizarre" : souvent les malwares se cachent dans des dossiers temporaires, de téléchargement ou sur le bureau
 def is_weird_path(path: str):
-    
+
     if not path:
         return False
-    
+
     p = path.lower()
     keywords = [
         "\\downloads\\",
@@ -107,6 +115,6 @@ def is_weird_path(path: str):
         "\\dropbox\\",
         "\\google drive\\",
         "\\startup\\",
-        "\\start menu\\programs\\startup\\"
+        "\\start menu\\programs\\startup\\",
     ]
     return any(k in p for k in keywords)

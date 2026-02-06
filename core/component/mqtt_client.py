@@ -1,11 +1,11 @@
-from business.EMQTTStatus import MQTTStatus
-from core.authentication import generate_client_id
+from core.enum.EMQTTStatus import MQTTStatus
+from core.component.authentication import generate_client_id
 import paho.mqtt.client as mqtt
 import threading
 import time
-from core.config import config
+from core.component.config import config
 import json
-from core.logger import get_logger
+from core.component.logger import get_logger
 
 logger = get_logger("mqtt_client")
 
@@ -19,13 +19,17 @@ mqtt_keepalive = config.getint("mqtt", "keepalive", fallback=60)
 _client = None
 _handlers = {}  # Dictionnaire topic -> fonction callback
 
+
 def get_mqtt_status():
     """Retourne le statut de la connexion MQTT."""
     global _client
     if _client is None:
         return MQTTStatus.DISCONNECTED
     else:
-        return MQTTStatus.CONNECTED if _client.is_connected() else MQTTStatus.DISCONNECTED
+        return (
+            MQTTStatus.CONNECTED if _client.is_connected() else MQTTStatus.DISCONNECTED
+        )
+
 
 def _on_connect(client, userdata, flags, rc):
     if rc == 0:
@@ -36,6 +40,7 @@ def _on_connect(client, userdata, flags, rc):
             logger.debug(f"📡 Auto-subscribe: {topic}")
     else:
         logger.error(f"⚠️ Erreur de connexion MQTT (code {rc})")
+
 
 def _on_message(client, userdata, msg):
     payload = msg.payload.decode()
@@ -50,10 +55,12 @@ def _on_message(client, userdata, msg):
     else:
         logger.warning(f"⚠️ Aucun handler défini pour {msg.topic}")
 
+
 def _mqtt_loop():
     """Boucle MQTT dans un thread séparé."""
     global _client
     _client.loop_forever()
+
 
 def init_mqtt():
     """Initialise et connecte le client MQTT (à appeler au démarrage)."""
@@ -66,7 +73,7 @@ def init_mqtt():
     _client = mqtt.Client()
     _client.on_connect = _on_connect
     _client.on_message = _on_message
-    _client._client_id = client_id.encode('utf-8')
+    _client._client_id = client_id.encode("utf-8")
 
     if mqtt_user:
         _client.username_pw_set(mqtt_user, mqtt_pass)
@@ -80,12 +87,12 @@ def init_mqtt():
     time.sleep(1)
     return _client
 
+
 def publish(topic: str, payload: str = None, qos: int = 0, retain: bool = False):
     """Publication via le client global."""
     if _client is not None:
-
         if "[client]" in topic:
-            topic = topic.replace("[client]", _client._client_id.decode('utf-8'))
+            topic = topic.replace("[client]", _client._client_id.decode("utf-8"))
 
         # si payload est un objet (pas str/bytes), le sérialiser en JSON
         if not isinstance(payload, (str, bytes)):
@@ -94,7 +101,13 @@ def publish(topic: str, payload: str = None, qos: int = 0, retain: bool = False)
             except (TypeError, ValueError):
                 # fallback pour objets non sérialisables : utiliser __dict__ ou str()
                 try:
-                    payload = json.dumps(payload, default=lambda o: o.__dict__ if hasattr(o, "__dict__") else str(o), ensure_ascii=False)
+                    payload = json.dumps(
+                        payload,
+                        default=lambda o: (
+                            o.__dict__ if hasattr(o, "__dict__") else str(o)
+                        ),
+                        ensure_ascii=False,
+                    )
                 except Exception:
                     payload = str(payload)
 
@@ -102,12 +115,12 @@ def publish(topic: str, payload: str = None, qos: int = 0, retain: bool = False)
     else:
         logger.error("❌ Client MQTT non initialisé !")
 
+
 def subscribe(topic: str, handler=None, qos: int = 0):
     """Souscription à un topic et enregistrement d'un handler optionnel."""
     if _client is not None:
-
         if "[client]" in topic:
-            topic = topic.replace("[client]", _client._client_id.decode('utf-8'))
+            topic = topic.replace("[client]", _client._client_id.decode("utf-8"))
 
         _client.subscribe(topic, qos)
         logger.info(f"📡 Abonné à {topic}")
@@ -115,6 +128,7 @@ def subscribe(topic: str, handler=None, qos: int = 0):
             _handlers[topic] = handler
     else:
         logger.error("❌ Client MQTT non initialisé !")
+
 
 def register_handler(topic: str, handler):
     """Enregistre un handler pour un topic sans s'abonner."""

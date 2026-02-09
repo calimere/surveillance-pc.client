@@ -20,6 +20,20 @@ _client = None
 _handlers = {}  # Dictionnaire topic -> fonction callback
 
 
+def ping():
+    """Vérifie la connectivité MQTT"""
+    if _client is not None:
+        try:
+            _client.publish("surveillance/[client]/ping", "ping", qos=1)
+            return True
+        except Exception as e:
+            logger.error(f"Erreur lors du ping MQTT: {e}")
+            return False
+    else:
+        logger.warning("Client MQTT non initialisé pour le ping")
+        return False
+
+
 def get_mqtt_status():
     """Retourne le statut de la connexion MQTT."""
     global _client

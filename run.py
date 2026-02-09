@@ -2,7 +2,6 @@ import time
 
 # from core.authentication import init_authentication
 from core.component.queue_manager import get_queue_worker, stop_queue_worker
-from core.component.queue_worker import IntelligentQueueWorker
 from core.business.db import init_db
 from core.business.running_processes import (
     compute_running_processes_scores,
@@ -29,6 +28,7 @@ send_discord_notification(
     f"Démarrage de la surveillance des exécutables sur le pc {get_pc_alias()}..."
 )
 init_db()
+
 # ------------- mise en attente de l'authentification client -------------
 # # authenticate client and get token
 # token = None

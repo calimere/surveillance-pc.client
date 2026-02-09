@@ -27,6 +27,7 @@ from core.business.process import (
     get_file_signer_with_timeout,
 )
 from core.enum.EQueueType import EQueueType
+from core.business.process import get_owner_for_pid_cached
 
 logger = get_logger("running_processes")
 
@@ -89,8 +90,6 @@ def populate_instance(instance):
         # ⚡ Version ultra-rapide sans WMI
         owner = "system"  # Valeur par défaut
         try:
-            from core.business.process import get_owner_for_pid_cached
-
             owner = get_owner_for_pid_cached(instance.pri_pid) or "system"
         except Exception as e:
             logger.debug(f"Erreur owner PID {instance.pri_pid}: {e}")

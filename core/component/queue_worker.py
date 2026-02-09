@@ -10,6 +10,13 @@ from core.component.config import config
 import requests
 from core.business.db import add_queue_with_tracking
 from core.business.db import get_pending_queue_messages
+from core.business.db import update_queue_status
+from core.business.db import cleanup_old_queue_messages
+
+from core.component.mqtt_client import publish
+from core.component.mqtt_client import get_mqtt_status, MQTTStatus
+from core.component.mqtt_client import ping
+
 
 """
 🧠 Décisions autonomes : MQTT vs HTTP selon disponibilité
@@ -275,8 +282,6 @@ class IntelligentQueueWorker(threading.Thread):
     def _mark_message_processing(self, message_id):
         """🔄 Marquer message en cours de traitement"""
         try:
-            from core.business.db import update_queue_status
-
             update_queue_status(message_id, "processing")
         except Exception as e:
             logger.error(f"Failed to mark processing {message_id}: {e}")
@@ -284,8 +289,6 @@ class IntelligentQueueWorker(threading.Thread):
     def _mark_message_sent(self, message_id):
         """✅ Marquer message comme envoyé"""
         try:
-            from core.business.db import update_queue_status
-
             update_queue_status(message_id, "sent", datetime.now())
         except Exception as e:
             logger.error(f"Failed to mark sent {message_id}: {e}")
@@ -293,8 +296,6 @@ class IntelligentQueueWorker(threading.Thread):
     def _mark_message_failed(self, message_id):
         """❌ Marquer message comme échoué"""
         try:
-            from core.business.db import update_queue_status
-
             update_queue_status(message_id, "failed", datetime.now())
         except Exception as e:
             logger.error(f"Failed to mark failed {message_id}: {e}")
@@ -302,8 +303,6 @@ class IntelligentQueueWorker(threading.Thread):
     def _cleanup_processed_messages(self):
         """🧹 Nettoyage périodique des messages traités"""
         try:
-            from core.business.db import cleanup_old_queue_messages
-
             # Supprimer messages envoyés > 24h ou échoués > 7 jours
             cleanup_old_queue_messages(
                 sent_older_than_hours=24,
@@ -320,8 +319,6 @@ class IntelligentQueueWorker(threading.Thread):
     def _try_mqtt(self, item):
         """📡 Tentative d'envoi MQTT"""
         try:
-            from core.component.mqtt_client import publish
-
             # Construire le topic selon le type de message
             topic = self._get_mqtt_topic(item)
             payload = self._format_mqtt_payload(item)
@@ -337,7 +334,7 @@ class IntelligentQueueWorker(threading.Thread):
     def _try_api(self, item):
         """🌐 Tentative d'envoi API HTTP"""
         try:
-            url = f"{get_api_base_url()}/notifications"
+            url = f"{API_BASE_URL}/notifications"
             payload = self._format_api_payload(item)
 
             response = requests.post(
@@ -362,8 +359,6 @@ class IntelligentQueueWorker(threading.Thread):
             # Test de latence périodique
             start = time.time()
             try:
-                from core.component.mqtt_client import ping
-
                 ping()
                 latency = (time.time() - start) * 1000  # en ms
             except:
@@ -379,8 +374,6 @@ class IntelligentQueueWorker(threading.Thread):
     def _check_mqtt_connection(self):
         """🔍 Vérifier connexion MQTT"""
         try:
-            from core.component.mqtt_client import get_mqtt_status, MQTTStatus
-
             return get_mqtt_status() == MQTTStatus.CONNECTED
         except:
             return False
@@ -412,13 +405,12 @@ class IntelligentQueueWorker(threading.Thread):
         """📦 Envoi batch API optimisé"""
         try:
             import requests
-            from core.component.config import get_api_base_url
 
             # Regrouper les données
             batch_data = [item for _, item in batch]
 
             response = requests.post(
-                f"{get_api_base_url()}/batch", json={"items": batch_data}, timeout=10
+                f"{API_BASE_URL}/batch", json={"items": batch_data}, timeout=10
             )
 
             if response.status_code == 200:
@@ -443,8 +435,6 @@ class IntelligentQueueWorker(threading.Thread):
     def _send_mqtt_batch(self, batch):
         """📡 Envoi batch MQTT"""
         try:
-            from core.component.mqtt_client import publish
-
             for _, item in batch:
                 topic = self._get_mqtt_topic(item)
                 payload = self._format_mqtt_payload(item)

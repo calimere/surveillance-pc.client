@@ -1,7 +1,19 @@
+import json
 import os
 import datetime
 from core.component.config import get_app_data_dir, get_db_path
-from peewee import *
+from peewee import (
+    Model,
+    AutoField,
+    TextField,
+    DateTimeField,
+    BooleanField,
+    IntegerField,
+    ForeignKeyField,
+    OperationalError,
+    DoesNotExist,
+    SqliteDatabase,
+)
 from core.component.logger import get_logger
 
 logger = get_logger("db")
@@ -21,6 +33,10 @@ db = SqliteDatabase(
 
 
 class BaseModel(Model):
+    sync_status = IntegerField(default=0)  # 0=local, 1=synced, 2=error
+    sync_timestamp = DateTimeField(null=True)
+    sync_version = IntegerField(default=1)  # Pour gestion conflits
+
     class Meta:
         database = db
 
@@ -99,6 +115,8 @@ class Queue(BaseModel):
     )  # type of item to process (e.g., "exe_event", "exe_list", "alarms", etc.)
     que_data = TextField()  # JSON data related to the item
     created = DateTimeField(default=datetime.datetime.now)
+    que_status = TextField(default="pending")  # pending, sent, failed
+    que_priority = IntegerField(default=5)  # 1=urgent, 9=faible, 5=normal
 
     class Meta:
         table_name = "queue"
@@ -129,7 +147,49 @@ def init_db():
     logger.info(f"Base de données créée à {get_db_path()}.")
 
 
-def add_queue(queue_type, queue_data):
+def add_queue_with_tracking(
+    queue_id, queue_type, queue_data, priority, status, created_at
+):
+    """Ajout avec tracking complet"""
+    return Queue.create(
+        que_id=queue_id,
+        que_type=queue_type,
+        que_data=json.dumps(queue_data),
+        que_priority=priority,
+        que_status=status,
+        created=created_at,
+    )
+
+
+def get_pending_queue_messages():
+    """Récupérer messages non traités"""
+    return [
+        {"id": q.que_id, "data": json.loads(q.que_data), "priority": q.que_priority}
+        for q in Queue.select().where(Queue.que_status == "pending")
+    ]
+
+
+def update_queue_status(message_id, status, updated_at=None):
+    """Mettre à jour statut"""
+    Queue.update(que_status=status, que_updated=updated_at or datetime.now()).where(
+        Queue.que_id == message_id
+    ).execute()
+
+
+def cleanup_old_queue_messages(sent_older_than_hours=24, failed_older_than_hours=168):
+    """Nettoyage automatique"""
+    cutoff_sent = datetime.now() - datetime.timedelta(hours=sent_older_than_hours)
+    cutoff_failed = datetime.now() - datetime.timedelta(hours=failed_older_than_hours)
+
+    # Supprimer messages envoyés anciens
+    Queue.delete().where(
+        (Queue.que_status == "sent") & (Queue.que_updated < cutoff_sent)
+    ).execute()
+
+    # Supprimer échecs très anciens
+    Queue.delete().where(
+        (Queue.que_status == "failed") & (Queue.que_updated < cutoff_failed)
+    ).execute()
     db.init(get_db_path())
     queue_item = Queue.create(
         que_type=queue_type, que_data=queue_data, created=datetime.datetime.now()

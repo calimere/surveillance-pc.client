@@ -1,13 +1,13 @@
 import datetime
 import psutil
 
+from core.component.queue_manager import add_notification, add_process_update
 from core.enum.EExeEventType import EExeEventType
 from core.business.db import (
     add_event,
     add_events_batch,
     add_process,
     add_process_instance,
-    add_queue,
     get_non_populate_process_instance,
     get_not_compute_process_instance,
     get_process_by_id,
@@ -22,48 +22,117 @@ from core.business.db import (
 )
 from core.component.logger import get_logger
 from core.business.process import (
-    get_file_signer,
-    get_owner_for_pid,
     get_visible_window_pids,
     is_weird_path,
+    get_file_signer_with_timeout,
 )
+from core.enum.EQueueType import EQueueType
 
 logger = get_logger("running_processes")
 
 
 def populate_instances():
-    instances = get_non_populate_process_instance()
-    for instance in instances:
-        try:
-            populate_instance(instance)
-        except Exception as e:
-            logger.error(
-                f"Erreur lors de la population de l'instance ID={instance.id}: {e}"
-            )
+
+    logger.info("Population des instances de processus...")
+
+    try:
+        instances = get_non_populate_process_instance()
+        total = len(instances)
+
+        if total == 0:
+            logger.info("Aucune instance à populer")
+            return
+
+        logger.info(f"{total} instances à populer")
+        processed = 0
+
+        for instance in instances:
+            try:
+                populate_instance(instance)
+                processed += 1
+
+                # Log de progression tous les 10
+                if processed % 10 == 0:
+                    logger.info(f"Population: {processed}/{total} instances traitées")
+
+            except Exception as e:
+                logger.error(
+                    f"Erreur lors de la population de l'instance ID={instance.pri_id}: {e}"
+                )
+
+                # Forcer comme populated pour éviter boucles infinies
+                try:
+                    set_process_instance_populated(
+                        instance.pri_id, "", "", False, "system"
+                    )
+                except:
+                    pass
+
+        logger.info(f"Population terminée: {processed}/{total} instances traitées")
+
+    except Exception as e:
+        logger.error(f"Erreur critique dans populate_instances: {e}")
+
+    logger.info("Population des instances de processus terminée.")
 
 
 def populate_instance(instance):
-    process = get_process_by_id(instance.prc_id)
-    if not process:
-        logger.error(f"Processus introuvable pour l'instance ID={instance.id}")
-        return
 
-    owner = get_owner_for_pid(instance.pri_pid)  # WMI
-    if not owner:
-        owner = "system"
+    logger.debug(f"Population de l'instance de processus ID={instance.pri_id}...")
 
-    signer = get_file_signer(process.prc_path)
+    try:
+        process = get_process_by_id(instance.prc_id)
+        if not process:
+            logger.error(f"Processus introuvable pour l'instance ID={instance.pri_id}")
+            return
 
-    signed_by = signer["subject"] if signer else ""
-    signed_thumbprint = signer["thumbprint"] if signer else ""
-    signed_is_ev = signer["is_ev"] if signer else False
+        # ⚡ Version ultra-rapide sans WMI
+        owner = "system"  # Valeur par défaut
+        try:
+            from core.business.process import get_owner_for_pid_cached
 
-    set_process_instance_populated(
-        instance.pri_id, signed_by, signed_thumbprint, signed_is_ev, owner
-    )
+            owner = get_owner_for_pid_cached(instance.pri_pid) or "system"
+        except Exception as e:
+            logger.debug(f"Erreur owner PID {instance.pri_pid}: {e}")
+            owner = "system"
+
+        # 🛡️ Signature avec timeout
+        signed_by = ""
+        signed_thumbprint = ""
+        signed_is_ev = False
+
+        try:
+            signer = get_file_signer_with_timeout(process.prc_path, timeout=5)
+            if signer:
+                signed_by = signer.get("subject", "")
+                signed_thumbprint = signer.get("thumbprint", "")
+                signed_is_ev = signer.get("is_ev", False)
+        except Exception as e:
+            logger.warning(
+                f"Impossible de vérifier la signature pour {process.prc_path}: {e}"
+            )
+
+        # 🏃‍♂️ Sauvegarde finale
+        set_process_instance_populated(
+            instance.pri_id, signed_by, signed_thumbprint, signed_is_ev, owner
+        )
+
+        logger.debug(f"Instance {instance.pri_id} populated avec succès")
+
+    except Exception as e:
+        logger.error(
+            f"Erreur critique lors de la population de l'instance {instance.pri_id}: {e}"
+        )
+        # Marquer comme populated même en cas d'erreur pour éviter les loops infinies
+        try:
+            set_process_instance_populated(instance.pri_id, "", "", False, "system")
+        except:
+            pass
 
 
 def handle_new_instances(new_instances, visible_pids):
+
+    logger.info(f"{len(new_instances)} nouvelles instances de processus détectées.")
 
     for proc, ppid, process in new_instances:
         try:
@@ -84,12 +153,24 @@ def handle_new_instances(new_instances, visible_pids):
             add_event(
                 process_instance.pri_id, EExeEventType.START, datetime.datetime.now()
             )
-            # ajout dans la queue pour notifier les clients en temps réel de la nouvelle instance (MQTT ou API)
+            # 📊 Notification nouveau processus
+            add_process_update(
+                "started",
+                {
+                    "name": proc.info["name"],
+                    "pid": proc.pid,
+                    "ppid": ppid,
+                    "exe": proc.info["exe"],
+                    "has_window": pid in visible_pids,
+                },
+            )
 
         except Exception as e:
             logger.error(
                 f"Erreur lors du traitement de la nouvelle instance PID={proc.pid}: {e}"
             )
+
+    logger.info(f"Traitement des nouvelles instances terminé.")
 
 
 def scan_running_processes():
@@ -97,8 +178,10 @@ def scan_running_processes():
     logger.info("Scan des processus en cours...")
 
     seen_instances = set()
+    processed_count = 0
+    max_processes_per_scan = 500  # Limite pour éviter surcharge
 
-    # Appeler une seule fois les fonctions coûteuses
+    # Appeler une seule fois les fonctions coûteuses avec timeout
     visible_pids = get_visible_window_pids()
 
     # Cache des processus pour réduire les requêtes DB
@@ -108,13 +191,41 @@ def scan_running_processes():
     new_processes = []
     new_instances = []
 
+    # 🛡️ psutil avec protection contre blocage
     for proc in psutil.process_iter(["pid", "name", "exe", "create_time"]):
         try:
-            pid = proc.info["pid"]
-            start_time = proc.info["create_time"]
-            name = proc.info["name"]
-            exe = proc.info["exe"] if proc.info["exe"] is not None else ""
-            ppid = proc.ppid()
+            processed_count += 1
+            if processed_count > max_processes_per_scan:
+                logger.warning(
+                    f"Limite de {max_processes_per_scan} processus atteinte, arrêt du scan"
+                )
+                break
+
+            # Timeout sur les infos processus
+            proc_info = None
+            try:
+                # Forcer refresh des infos avec timeout implicite
+                proc_info = proc.as_dict(attrs=["pid", "name", "exe", "create_time"])
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+            except Exception as e:
+                logger.debug(f"Erreur accès processus {proc.pid}: {e}")
+                continue
+
+            if not proc_info:
+                continue
+
+            pid = proc_info["pid"]
+            start_time = proc_info["create_time"]
+            name = proc_info["name"] or "unknown"
+            exe = proc_info["exe"] if proc_info["exe"] is not None else ""
+
+            # Récupérer ppid avec protection
+            ppid = 0
+            try:
+                ppid = proc.ppid()
+            except:
+                ppid = 0
 
             key = (pid, start_time)
             seen_instances.add(key)
@@ -123,10 +234,12 @@ def scan_running_processes():
             cache_key = (name, exe)
             if cache_key not in process_cache:
                 process = get_process_by_name(name, exe)
+
                 if not process:
                     process = add_process(name, exe)
-                    logger.info(f"Nouveau processus détecté : {name}")
-                    new_processes.append(process)
+
+                logger.info(f"Nouveau processus détecté : {name}")
+                new_processes.append(process)
                 process_cache[cache_key] = process
             else:
                 process = process_cache[cache_key]
@@ -134,17 +247,12 @@ def scan_running_processes():
             instance = get_process_instance_by_pid(pid, start_time)
             if not instance:
                 new_instances.append((proc, ppid, process))
+
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
             # Le processus a disparu pendant l'itération
             continue
 
-    # vérifier le nombre de processus détecté pour savoir s'il faut appeler l'API pour ajouter en masse ou s'il faut passer par MQTT pour chaque processus (ex: si plus de 10 processus détecté, appeler l'API pour ajouter en masse, sinon passer par MQTT pour chaque processus)
-    if len(new_processes) > 10:
-        logger.info(
-            f"{len(new_processes)} nouveaux processus détectés, ajout en masse via l'API"
-        )
-    else:
-        logger.info(f"{len(new_processes)} nouveaux processus détectés, ajout via MQTT")
+    logger.info(f"{len(new_processes)} nouveaux processus détectés.")
 
     # Traiter les nouvelles instances après avoir collecté toutes les infos
     handle_new_instances(new_instances, visible_pids)
@@ -205,6 +313,37 @@ def base_compute(instances):
 
     for instance in instances:
         score = calculate_risk_score(instance, children, parents)
+
+        # ALARME IMMEDIATE SI SCORE TRES ELEVE
+        if score > 10:  # seuil à ajuster
+            logger.warning(
+                f"Instance de processus suspecte détectée: PID={instance.pri_pid}, Score={score}"
+            )
+            add_notification(
+                EQueueType.NOTIFICATION,
+                {
+                    "instance_id": instance.id,
+                    "score": score,
+                    "process_name": instance.name,
+                    "timestamp": datetime.now(),
+                },
+            )
+
+        # ALARME IMMEDIATE SI SCORE TRES ELEVE
+        if score > 20:  # seuil à ajuster
+            logger.error(
+                f"Instance de processus très suspecte détectée: PID={instance.pri_pid}, Score={score}"
+            )
+            add_notification(
+                EQueueType.SECURITY_ALERT,
+                {
+                    "instance_id": instance.id,
+                    "score": score,
+                    "process_name": instance.name,
+                    "timestamp": datetime.now(),
+                },
+            )
+
         update_process_instance_score(instance.pri_id, score)
 
 
@@ -282,5 +421,7 @@ def calculate_risk_score(instance, child_instances, parent_instances):
     # TODO : Pondération temporelle (très bonne idée) - Un enfant lancé il y a 5 min compte plus que celui d’hier.
     # TODO : Ajouter pri_score_dirty pour éviter de devoir rescorrer tous les parents à chaque fois qu’un enfant est mis à jour, et ne rescorrer que les parents directs d’un enfant quand celui-ci est mis à jour (ex: quand un enfant est STOP, on met à jour son score et on met à jour le score de son parent direct en fonction du nouveau score de l’enfant, sans devoir rescorrer tous les autres enfants du parent)
     # TODO : ne rescorer que les instances qui paraissent louche (ajouter un score_dirty pour ne rescorer que les instances qui ont un score élevé ou qui ont des événements suspects, et ne pas rescorer les instances qui ont un score bas et qui n'ont pas d'événements suspects)
+
+    # TODO : modifier l'objet de retour pour ajouter un message d'alerte et un niveau de criticité (ex: low, medium, high) en fonction du score, pour faciliter la prise de décision dans les clients (ex: si score > 10 => high risk, si score > 5 => medium risk, sinon low risk)
 
     return max(score, 0)

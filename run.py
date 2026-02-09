@@ -1,7 +1,7 @@
 import time
-from peewee import SqliteDatabase
 
 # from core.authentication import init_authentication
+from core.component.queue_manager import get_queue_worker, stop_queue_worker
 from core.component.queue_worker import IntelligentQueueWorker
 from core.business.db import init_db
 from core.business.running_processes import (
@@ -11,11 +11,16 @@ from core.business.running_processes import (
     scan_running_processes,
 )
 from core.component.notification import send_discord_notification
-from core.component.config import config, get_db_path, get_pc_alias
+from core.component.config import config, get_pc_alias
 from core.component.mqtt_client import generate_client_id, init_mqtt, publish, subscribe
 from core.business.mqtt_handlers import handle_surveillance_cmd, handle_surveillance_ack
 from core.component.logger import get_logger
-from core.database.services.process_repository import ProcessRepository
+from core.component.memory_monitor import (
+    start_memory_monitoring,
+    stop_memory_monitoring,
+    log_memory_report,
+)
+from core.component.memory_optimizer import MemoryOptimizer
 
 logger = get_logger("main")
 
@@ -61,39 +66,44 @@ if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
 # TODO : queueworker => # alerte temps réel  # - ajouter les messages dans la queue avec un type et des données, et un worker qui traite ces messages en fonction de leur type (ex: notification, mise à jour de processus, etc) et qui publie les messages via MQTT ou API en fonction de la disponibilité de MQTT, et qui gère les erreurs et les retries en cas d'échec de publication, et qui stocke les messages en attente dans une base de données locale pour éviter de perdre des messages en cas de redémarrage du client
 
 
-# run.py - Initialisation
-# worker = IntelligentQueueWorker()
-# worker.start()
+worker = get_queue_worker()  # Se lance automatiquement
 
-
-# # Utilisation simple mais puissante
-# def on_high_risk_detected(instance, score):
-#     worker.add_item(
-#         {
-#             "type": "security_alert",
-#             "data": instance,
-#             "score": score,
-#             "timestamp": time.time(),
-#         },
-#         priority=1,
-#     )  # Priorité maximale
-
-
-# def on_process_batch_ready(processes):
-#     worker.add_item(
-#         {"type": "process_update", "data": processes, "batch_size": len(processes)},
-#         priority=3,
-#     )
-
+# 🧠 Démarrage du monitoring mémoire
+start_memory_monitoring()
+logger.info("Monitoring mémoire activé")
 
 # main loop
-while True:
-    publish("surveillance/[client]/uptime")
-    scan_running_processes()
-    time.sleep(1)
-    populate_instances()
 
-    time.sleep(5)
-    compute_running_processes_scores()
-    time.sleep(1)
-    compute_scores()
+try:
+    loop_count = 0
+    while True:
+        publish("surveillance/[client]/uptime")
+        scan_running_processes()
+        time.sleep(0.1)
+        populate_instances()
+        time.sleep(0.1)
+        compute_running_processes_scores()
+        time.sleep(0.1)
+        compute_scores()
+
+        # 🧠 Nettoyage mémoire périodique (toutes les 10 boucles)
+        loop_count += 1
+        if loop_count % 10 == 0:
+            collected = MemoryOptimizer.force_garbage_collection()
+            if collected > 0:
+                logger.debug(f"🗑️ {collected} objets nettoyés par le GC")
+
+        # 📊 Rapport mémoire périodique (toutes les 100 boucles, ~10 minutes)
+        if loop_count % 100 == 0:
+            log_memory_report()
+            loop_count = 0  # Reset pour éviter l'overflow
+
+except KeyboardInterrupt:
+    logger.info("Arrêt demandé...")
+finally:
+    # Arrêt propre
+    logger.info("Arrêt du système...")
+    log_memory_report()  # Rapport final
+    stop_memory_monitoring()
+    stop_queue_worker()
+    logger.info("Système arrêté proprement")

@@ -3,6 +3,7 @@ from core.component.mqtt_client import publish
 import json
 
 
+# Handlers pour les commandes de surveillance reçues via MQTT
 def handle_surveillance_cmd(payload):
 
     payload_obj = None

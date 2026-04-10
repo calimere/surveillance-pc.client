@@ -244,8 +244,12 @@ def get_process_by_id(prc_id):
 def get_process_by_name(name, path):
     db.init(get_db_path())
     try:
-        prc = Process.get((Process.prc_name == name) & (Process.prc_path == path))
-        return prc
+        if path:
+            prc = Process.get((Process.prc_name == name) & (Process.prc_path == path))
+            return prc
+        else:
+            logger.warning(f"Impossible de récupérer le processus '{name}' sans chemin.")
+            return None
     except DoesNotExist:
         return None
 
@@ -253,6 +257,10 @@ def get_process_by_name(name, path):
 def add_process(name, path):
     db.init(get_db_path())
     now = datetime.datetime.now()
+
+    if not path:
+        logger.warning(f"Impossible d'ajouter le processus '{name}' sans chemin.")
+        return None
 
     prc = Process.create(
         prc_name=name,

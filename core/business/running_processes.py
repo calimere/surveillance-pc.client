@@ -76,7 +76,6 @@ def populate_instances():
 
     logger.info("Population des instances de processus terminée.")
 
-
 def populate_instance(instance):
 
     logger.debug(f"Population de l'instance de processus ID={instance.pri_id}...")
@@ -128,7 +127,6 @@ def populate_instance(instance):
         except:
             pass
 
-
 def handle_new_instances(new_instances, visible_pids):
 
     logger.info(f"{len(new_instances)} nouvelles instances de processus détectées.")
@@ -170,7 +168,6 @@ def handle_new_instances(new_instances, visible_pids):
             )
 
     logger.info(f"Traitement des nouvelles instances terminé.")
-
 
 def scan_running_processes():
 
@@ -234,17 +231,23 @@ def scan_running_processes():
             if cache_key not in process_cache:
                 process = get_process_by_name(name, exe)
 
-                if not process:
-                    process = add_process(name, exe)
-
-                logger.info(f"Nouveau processus détecté : {name}")
-                new_processes.append(process)
-                process_cache[cache_key] = process
+                if process is None:
+                    
+                    if exe == "":
+                        logger.warning(
+                            f"Processus '{name}' sans chemin d'accès, impossible de l'ajouter à la base de données."
+                        )
+                        continue
+                    else :
+                        process = add_process(name, exe)
+                        logger.info(f"Nouveau processus détecté : {name}")
+                        new_processes.append(process)
+                        process_cache[cache_key] = process
             else:
                 process = process_cache[cache_key]
 
             instance = get_process_instance_by_pid(pid, start_time)
-            if not instance:
+            if not instance and process:
                 new_instances.append((proc, ppid, process))
 
         except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
@@ -291,7 +294,6 @@ def scan_running_processes():
     logger.debug(
         f"Scan terminé. {len(new_instances)} nouvelles instances, {stopped_count} arrêtées."
     )
-
 
 def base_compute(instances):
 
@@ -345,18 +347,15 @@ def base_compute(instances):
 
         update_process_instance_score(instance.pri_id, score)
 
-
 def compute_running_processes_scores():
 
     instances = get_running_instances_without_score()
     base_compute(instances)  # pour construire les structures parents/enfants
 
-
 def compute_scores():
 
     instances = get_not_compute_process_instance()
     base_compute(instances)
-
 
 def calculate_risk_score(instance, child_instances, parent_instances):
 

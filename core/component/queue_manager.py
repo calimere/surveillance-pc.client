@@ -5,6 +5,7 @@ Singleton pattern pour accès depuis tout le projet
 
 from core.component.queue_worker import IntelligentQueueWorker
 from core.component.logger import get_logger
+from core.enum.EQueueType import EQueueType
 
 logger = get_logger("queue_manager")
 
@@ -28,44 +29,61 @@ def get_queue_worker() -> IntelligentQueueWorker:
     return _queue_worker_instance
 
 
-def add_notification(message_type: str, data: dict, priority: int = 5):
+def add_notification(message_type: EQueueType, data: dict, priority: int = 5):
     """
     🎯 Fonction helper pour ajouter une notification
 
     Args:
-        message_type: Type du message (security_alert, process_update, etc.)
+        message_type: Type du message (EQueueType.SECURITY_ALERT, EQueueType.NOTIFICATION, etc.)
         data: Données du message
         priority: Priorité (1=urgent, 9=faible, 5=normal)
     """
     worker = get_queue_worker()
 
     item = {
-        "type": message_type,
+        "type": message_type.value,  # Utiliser la valeur de l'enum
         **data,  # Merge des données
     }
 
     worker.add_item(item, priority)
-    logger.debug(f"Message ajouté en queue: {message_type}")
+    logger.debug(f"Message ajouté en queue: {message_type.value}")
 
 
 def add_security_alert(process_name: str, score: int, details: dict = None):
     """🚨 Helper pour alertes de sécurité"""
     data = {"process_name": process_name, "risk_score": score, "details": details or {}}
-    add_notification("security_alert", data, priority=1)
+    add_notification(EQueueType.SECURITY_ALERT, data, priority=1)
 
-
-def add_process_update(action: str, process_data: dict):
-    """📊 Helper pour mises à jour de processus"""
+def add_process_instance_created(instance_data: dict):
+    """🆕 Helper pour nouvelle instance de processus créée en BDD"""
     data = {
-        "action": action,  # "started", "stopped", "updated"
-        "process": process_data,
+        "action": "instance_created",
+        "instance": instance_data,
     }
-    add_notification("process_update", data, priority=3)
+    add_notification(EQueueType.PROCESS_EVENT, data, priority=4)
+
+
+def add_process_event_started(instance_data: dict):
+    """▶️ Helper pour événement START d'une instance"""
+    data = {
+        "action": "process_started", 
+        "instance": instance_data,
+    }
+    add_notification(EQueueType.PROCESS_EVENT, data, priority=3)
+
+
+def add_process_event_stopped(instance_data: dict):
+    """⏹️ Helper pour événement STOP d'une instance"""
+    data = {
+        "action": "process_stopped",
+        "instance": instance_data,
+    }
+    add_notification(EQueueType.PROCESS_EVENT, data, priority=3)
 
 
 def add_heartbeat(system_status: dict):
     """💓 Helper pour heartbeat système"""
-    add_notification("heartbeat", system_status, priority=9)
+    add_notification(EQueueType.HEARTBEAT, system_status, priority=9)
 
 
 def stop_queue_worker():
@@ -78,3 +96,37 @@ def stop_queue_worker():
         _queue_worker_instance.join(timeout=5)
         _queue_worker_instance = None
         logger.info("Queue Worker arrêté")
+
+
+def get_circuit_breaker_status():
+    """📊 Obtenir le statut des circuit breakers"""
+    worker = get_queue_worker()
+    return worker.get_circuit_breaker_status()
+
+
+def reset_circuit_breakers():
+    """🔄 Reset force des circuit breakers (pour dépannage)"""
+    worker = get_queue_worker()
+    
+    # Reset API circuit breaker
+    worker.api_circuit_breaker = {
+        "state": "closed",
+        "failure_count": 0,
+        "last_failure": None,
+        "timeout": 30,
+        "failure_threshold": 5,
+        "next_retry": 0
+    }
+    
+    # Reset MQTT circuit breaker  
+    worker.mqtt_circuit_breaker = {
+        "state": "closed",
+        "failure_count": 0,
+        "last_failure": None,
+        "timeout": 15,
+        "failure_threshold": 3,
+        "next_retry": 0
+    }
+    
+    logger.info("🔄 Circuit breakers manually reset")
+    return True

@@ -50,6 +50,29 @@ class IntelligentQueueWorker(threading.Thread):
         self.persistent_types = ["security_alert", "critical_error", "process_blocked"]
         self.processed_ids = set()  # Cache des IDs traités
         self._sequence_counter = 0  # Pour éviter les comparaisons de dict
+        
+        # 🛡️ Circuit breaker pour API et MQTT
+        self.api_circuit_breaker = {
+            "state": "closed",  # closed, open, half_open
+            "failure_count": 0,
+            "last_failure": None,
+            "timeout": 30,  # seconds before trying half_open
+            "failure_threshold": 5,
+            "next_retry": 0
+        }
+        
+        self.mqtt_circuit_breaker = {
+            "state": "closed",
+            "failure_count": 0, 
+            "last_failure": None,
+            "timeout": 15,  # MQTT plus rapide à récupérer
+            "failure_threshold": 3,
+            "next_retry": 0
+        }
+        
+        # 📊 Limitation des threads de retry actifs
+        self.active_retry_threads = 0
+        self.max_retry_threads = 5
 
     def run(self):
         """Boucle autonome avec auto-optimisation"""
@@ -199,21 +222,57 @@ class IntelligentQueueWorker(threading.Thread):
         return self._mqtt_status_cache["status"]
 
     def _smart_retry(self, item):
-        """♻️ Retry intelligent avec backoff"""
+        """♻️ Retry intelligent avec backoff et limitation des threads"""
         retries = item.get("retries", 0)
-
-        if retries < 3:
-            # Backoff exponentiel avec jitter
-            delay = (2**retries) + uniform(0, 1)
-
-            # Repriorise selon l'urgence
-            if item.get("priority") == "high":
-                priority = 1
-            else:
-                priority = 5 + retries  # Baisse la priorité
-
-            # Remet en queue après délai
-            threading.Timer(delay, lambda: self.add_item(item, priority)).start()
+        
+        # 🛑 Limiter le nombre de retries
+        if retries >= 5:  # Maximum 5 retries au lieu de 3
+            logger.warning(f"Max retries reached for item {item.get('id')}, dropping")
+            if item.get("type") in self.persistent_types:
+                self._mark_message_failed(item.get("id"))
+            return
+        
+        # 🛑 Limiter le nombre de threads de retry actifs
+        if self.active_retry_threads >= self.max_retry_threads:
+            logger.debug(f"Max retry threads ({self.max_retry_threads}) reached, queueing for later")
+            # Remet directement en queue au lieu de créer un thread
+            item["retries"] = retries + 1
+            priority = 7 + retries  # Priorité plus basse
+            self.add_item(item, priority)
+            return
+        
+        # ⏳ Calcul du délai avec backoff exponentiel + jitter
+        base_delay = 2 ** retries  # 1s, 2s, 4s, 8s, 16s
+        jitter = uniform(0.5, 1.5)  # Éviter thundering herd
+        delay = min(base_delay * jitter, 60)  # Max 60s
+        
+        # 🔍 Augmenter délai si circuit breakers ouverts
+        if self.api_circuit_breaker["state"] == "open" and self.mqtt_circuit_breaker["state"] == "open":
+            delay = max(delay, 30)  # Minimum 30s si tout est down
+            logger.debug(f"Both API and MQTT down, increasing retry delay to {delay:.1f}s")
+        
+        # 📊 Mise à jour item pour retry
+        item["retries"] = retries + 1
+        
+        # Repriorise selon l'urgence et tentatives
+        if item.get("type") == "security_alert":
+            priority = min(2 + retries, 5)  # Garde priorité pour security
+        else:
+            priority = 5 + retries  # Baisse la priorité
+        
+        # 🕐 Programmer retry avec thread limité
+        def retry_with_cleanup():
+            self.active_retry_threads += 1
+            try:
+                time.sleep(delay)  # Pause avant retry
+                if self.running:  # Vérifier si worker toujours actif
+                    self.add_item(item, priority)
+            finally:
+                self.active_retry_threads -= 1
+                
+        threading.Timer(0, retry_with_cleanup).start()
+        
+        logger.debug(f"Scheduled retry #{retries + 1} for {item.get('id')} in {delay:.1f}s (priority {priority})")
 
     def _save_to_persistent_queue(self, item, priority):
         """💾 Sauvegarde en table avec statut"""
@@ -250,16 +309,17 @@ class IntelligentQueueWorker(threading.Thread):
             logger.error(f"Failed to load pending messages: {e}")
 
     def _send_immediately(self, item):
-        """⚡ Envoi prioritaire multi-canal avec traçabilité"""
+        """⚡ Envoi prioritaire multi-canal avec circuit breakers"""
         success = False
         message_id = item.get("id")
 
         try:
-            # Priorité : MQTT si rapide, sinon HTTP
-            if self._mqtt_healthy() and self._mqtt_fast():
+            # 🛡️ Essayer MQTT en premier si healthy et rapide
+            if (self._can_try_mqtt() and self._mqtt_healthy() and self._mqtt_fast()):
                 success = self._try_mqtt(item)
 
-            if not success:
+            # 🛡️ Fallback API si MQTT échoue ou indisponible
+            if not success and self._can_try_api():
                 success = self._try_api(item)
 
             if success:
@@ -269,15 +329,41 @@ class IntelligentQueueWorker(threading.Thread):
                     self._mark_message_sent(message_id)
 
             else:
-                # ❌ Échec - retry intelligent
+                # ❌ Échec sur tous les canaux - retry intelligent
                 if item.get("type") in self.persistent_types:
                     self._mark_message_failed(message_id)
+                
+                # ⏳ Pause légère pour éviter retry immédiat
+                if not self._can_try_api() and not self._can_try_mqtt():
+                    # Tous les canaux fermés - attendre avant retry
+                    time.sleep(uniform(1.0, 3.0))
+                    
                 self._smart_retry(item)
 
         except Exception as e:
             logger.error(f"Send failed for {message_id}: {e}")
             if item.get("type") in self.persistent_types:
                 self._mark_message_failed(message_id)
+            self._smart_retry(item)
+            
+    def get_circuit_breaker_status(self):
+        """📊 Retourner le statut des circuit breakers"""
+        return {
+            "api": {
+                "state": self.api_circuit_breaker["state"],
+                "failure_count": self.api_circuit_breaker["failure_count"],
+                "next_retry": self.api_circuit_breaker.get("next_retry", 0),
+                "time_until_retry": max(0, self.api_circuit_breaker.get("next_retry", 0) - time.time())
+            },
+            "mqtt": {
+                "state": self.mqtt_circuit_breaker["state"], 
+                "failure_count": self.mqtt_circuit_breaker["failure_count"],
+                "next_retry": self.mqtt_circuit_breaker.get("next_retry", 0),
+                "time_until_retry": max(0, self.mqtt_circuit_breaker.get("next_retry", 0) - time.time())
+            },
+            "active_retry_threads": self.active_retry_threads,
+            "max_retry_threads": self.max_retry_threads
+        }
 
     def _mark_message_processing(self, message_id):
         """🔄 Marquer message en cours de traitement"""
@@ -317,7 +403,12 @@ class IntelligentQueueWorker(threading.Thread):
             logger.error(f"Cleanup failed: {e}")
 
     def _try_mqtt(self, item):
-        """📡 Tentative d'envoi MQTT"""
+        """📡 Tentative d'envoi MQTT avec circuit breaker"""
+        # 🛡️ Vérifier circuit breaker avant tentative
+        if not self._can_try_mqtt():
+            logger.debug("MQTT circuit breaker open, skipping attempt")
+            return False
+            
         try:
             # Construire le topic selon le type de message
             topic = self._get_mqtt_topic(item)
@@ -325,30 +416,274 @@ class IntelligentQueueWorker(threading.Thread):
 
             # Envoi avec timeout
             result = publish(topic, payload, timeout=2)
-            return result is not None
+            
+            if result is not None:
+                # ✅ Succès MQTT
+                self._mqtt_success()
+                return True
+            else:
+                # ❌ Échec MQTT
+                self._mqtt_failure()
+                return False
 
         except Exception as e:
-            logger.error(f"MQTT send failed: {e}")
+            logger.debug(f"MQTT send failed: {e}")
+            # ❌ Échec MQTT
+            self._mqtt_failure()
             return False
+            
+    def _can_try_mqtt(self):
+        """🛡️ Vérifier si on peut essayer MQTT (circuit breaker)"""
+        cb = self.mqtt_circuit_breaker
+        now = time.time()
+        
+        if cb["state"] == "closed":
+            return True
+            
+        elif cb["state"] == "open":
+            if now >= cb["next_retry"]:
+                cb["state"] = "half_open"
+                logger.info("🔄 MQTT circuit breaker: open → half_open")
+                return True
+            return False
+            
+        elif cb["state"] == "half_open":
+            return True
+            
+        return False
+        
+    def _mqtt_success(self):
+        """✅ Enregistrer succès MQTT"""
+        cb = self.mqtt_circuit_breaker
+        if cb["failure_count"] > 0:
+            logger.info(f"🔄 MQTT recovered after {cb['failure_count']} failures")
+        
+        cb["state"] = "closed"
+        cb["failure_count"] = 0
+        cb["last_failure"] = None
+        
+    def _mqtt_failure(self):
+        """❌ Enregistrer échec MQTT"""
+        cb = self.mqtt_circuit_breaker
+        cb["failure_count"] += 1
+        cb["last_failure"] = time.time()
+        
+        if cb["failure_count"] >= cb["failure_threshold"]:
+            if cb["state"] != "open":
+                backoff_time = min(cb["timeout"] * (2 ** (cb["failure_count"] - cb["failure_threshold"])), 120)  # Max 2min pour MQTT
+                cb["state"] = "open"
+                cb["next_retry"] = time.time() + backoff_time
+                logger.warning(f"🚫 MQTT circuit breaker OPEN for {backoff_time:.0f}s after {cb['failure_count']} failures")
+        
+        elif cb["state"] == "half_open":
+            backoff_time = cb["timeout"]
+            cb["state"] = "open" 
+            cb["next_retry"] = time.time() + backoff_time
+            logger.warning(f"🚫 MQTT circuit breaker: half_open → open for {backoff_time}s")
 
     def _try_api(self, item):
-        """🌐 Tentative d'envoi API HTTP"""
+        """🌐 Tentative d'envoi API HTTP avec circuit breaker"""
+        # 🛡️ Vérifier circuit breaker avant tentative
+        if not self._can_try_api():
+            logger.debug("API circuit breaker open, skipping attempt")
+            return False
+            
         try:
-            url = f"{API_BASE_URL}/notifications"
-            payload = self._format_api_payload(item)
+            # 🎯 Routage intelligent selon le type de message
+            endpoint_info = self._get_api_endpoint(item)
+            url = f"{API_BASE_URL}{endpoint_info['path']}"
+            payload = self._format_api_payload(item, endpoint_info['format'])
 
             response = requests.post(
                 url,
                 json=payload,
-                timeout=5,
+                timeout=endpoint_info.get('timeout', 5),
                 headers={"Content-Type": "application/json"},
             )
 
-            return response.status_code == 200
+            if response.status_code == 200:
+                # ✅ Succès - reset circuit breaker
+                self._api_success()
+                return True
+            else:
+                # ❌ Échec HTTP - compter comme erreur
+                self._api_failure()
+                return False
 
         except Exception as e:
-            logger.error(f"API send failed: {e}")
+            logger.debug(f"API send failed: {e}")
+            # ❌ Échec réseau/timeout - compter comme erreur
+            self._api_failure() 
             return False
+            
+    def _can_try_api(self):
+        """🛡️ Vérifier si on peut essayer l'API (circuit breaker)"""
+        cb = self.api_circuit_breaker
+        now = time.time()
+        
+        if cb["state"] == "closed":
+            return True
+            
+        elif cb["state"] == "open":
+            # Vérifier si on peut passer en half_open
+            if now >= cb["next_retry"]:
+                cb["state"] = "half_open"
+                logger.info("🔄 API circuit breaker: open → half_open")
+                return True
+            return False
+            
+        elif cb["state"] == "half_open":
+            return True
+            
+        return False
+        
+    def _api_success(self):
+        """✅ Enregistrer succès API - reset circuit breaker"""
+        cb = self.api_circuit_breaker
+        if cb["failure_count"] > 0:
+            logger.info(f"🔄 API recovered after {cb['failure_count']} failures")
+        
+        cb["state"] = "closed"
+        cb["failure_count"] = 0
+        cb["last_failure"] = None
+        
+    def _api_failure(self):
+        """❌ Enregistrer échec API - incrémenter circuit breaker"""
+        cb = self.api_circuit_breaker
+        cb["failure_count"] += 1
+        cb["last_failure"] = time.time()
+        
+        if cb["failure_count"] >= cb["failure_threshold"]:
+            if cb["state"] != "open":
+                # Passage en mode ouvert avec backoff exponentiel  
+                backoff_time = min(cb["timeout"] * (2 ** (cb["failure_count"] - cb["failure_threshold"])), 300)  # Max 5min
+                cb["state"] = "open"
+                cb["next_retry"] = time.time() + backoff_time
+                logger.warning(f"🚫 API circuit breaker OPEN for {backoff_time:.0f}s after {cb['failure_count']} failures")
+        
+        elif cb["state"] == "half_open":
+            # Retour en mode ouvert si échec en half_open
+            backoff_time = cb["timeout"]  
+            cb["state"] = "open"
+            cb["next_retry"] = time.time() + backoff_time
+            logger.warning(f"🚫 API circuit breaker: half_open → open for {backoff_time}s")
+
+    def _get_api_endpoint(self, item):
+        """🎯 Déterminer l'endpoint API selon le type de message"""
+        message_type = item.get("type", "unknown")
+        
+        # 📍 Mapping des endpoints spécialisés
+        endpoint_mapping = {
+            "security_alert": {
+                "path": "/security/alerts",
+                "format": "security",
+                "timeout": 10  # Plus de temps pour les alertes critiques
+            },
+            "process_event": {
+                "path": self._get_process_endpoint_path(item),
+                "format": "process_event", 
+                "timeout": 7
+            },
+            "notification": {
+                "path": "/notifications/general",
+                "format": "notification",
+                "timeout": 5
+            },
+            "heartbeat": {
+                "path": "/system/heartbeat",
+                "format": "heartbeat",
+                "timeout": 3  # Heartbeat doit être rapide
+            }
+        }
+        
+        return endpoint_mapping.get(
+            message_type, 
+            {"path": "/events/generic", "format": "generic", "timeout": 5}  # Fallback
+        )
+    
+    def _get_process_endpoint_path(self, item):
+        """🔄 Sous-routage pour les événements de processus"""
+        action = item.get("action", "unknown")
+        
+        action_endpoints = {
+            "instance_created": "/processes/instances",
+            "process_started": "/processes/events/start", 
+            "process_stopped": "/processes/events/stop",
+            "process_updated": "/processes/instances/update"
+        }
+        
+        return action_endpoints.get(action, "/processes/events/generic")
+    
+    def _format_api_payload(self, item, format_type):
+        """📝 Formatter payload API selon le type d'endpoint"""
+        base_payload = {
+            "message_id": item.get("id"),
+            "timestamp": item.get("created_at"),
+        }
+        
+        if format_type == "security":
+            return {
+                **base_payload,
+                "alert_type": "process_security",
+                "severity": self._map_priority_to_severity(item),
+                "process_name": item.get("process_name"),  
+                "risk_score": item.get("risk_score"),
+                "details": item.get("details", {}),
+                "instance_id": item.get("instance_id")
+            }
+            
+        elif format_type == "process_event":
+            return {
+                **base_payload,
+                "event_type": item.get("action"), 
+                "process_instance": item.get("instance", {}),
+                "metadata": {
+                    "source": "surveillance_client",
+                    "version": "1.0"
+                }
+            }
+            
+        elif format_type == "heartbeat":
+            return {
+                **base_payload,
+                "client_status": "alive",
+                "system_info": item,
+                "metrics": {
+                    "uptime": item.get("uptime"),
+                    "cpu_usage": item.get("cpu_usage"),
+                    "memory_usage": item.get("memory_usage")
+                }
+            }
+            
+        elif format_type == "notification":
+            return {
+                **base_payload,
+                "notification_type": "general",
+                "message": item.get("message", ""),
+                "severity": "info", 
+                "data": {k: v for k, v in item.items() 
+                        if k not in ["id", "type", "created_at"]}
+            }
+            
+        else:  # format_type == "generic"
+            return {
+                **base_payload,
+                "event_type": "generic",  
+                "raw_data": item
+            }
+            
+    def _map_priority_to_severity(self, item):
+        """🎯 Mapper priorité vers niveau de sévérité"""
+        score = item.get("risk_score", 0)
+        
+        if score >= 20:
+            return "critical"
+        elif score >= 10:
+            return "high" 
+        elif score >= 5:
+            return "medium"
+        else:
+            return "low"
 
     def _mqtt_fast(self):
         """⚡ Vérifier si MQTT est rapide (latence < 500ms)"""
@@ -402,35 +737,132 @@ class IntelligentQueueWorker(threading.Thread):
         return groups
 
     def _send_batch_api(self, batch):
-        """📦 Envoi batch API optimisé"""
+        """📦 Envoi batch API avec circuit breaker et rate limiting"""
+        # 🛡️ Vérifier circuit breaker avant batch
+        if not self._can_try_api():
+            logger.debug("API circuit breaker open, skipping batch and queueing individual items")
+            # Reporter tous les items au lieu de les perdre
+            for _, item in batch:
+                self._smart_retry(item)
+            return False
+            
         try:
-            import requests
-
-            # Regrouper les données
-            batch_data = [item for _, item in batch]
-
-            response = requests.post(
-                f"{API_BASE_URL}/batch", json={"items": batch_data}, timeout=10
-            )
-
-            if response.status_code == 200:
-                # Marquer tous comme envoyés
-                for _, item in batch:
-                    if item.get("id"):
-                        self.processed_ids.add(item["id"])
-                        if item.get("type") in self.persistent_types:
-                            self._mark_message_sent(item["id"])
-                return True
-            else:
-                # Traiter individuellement en cas d'échec batch
-                for _, item in batch:
-                    self._send_immediately(item)
-
+            # 📊 Regrouper par type d'endpoint pour batch optimisé
+            endpoint_groups = self._group_batch_by_endpoint(batch)
+            
+            all_success = True
+            
+            for endpoint_path, items in endpoint_groups.items():
+                # 🛑 Vérifier si on peut encore essayer après chaque groupe
+                if not self._can_try_api():
+                    logger.debug(f"API circuit breaker opened mid-batch, queueing remaining items")
+                    for _, item in items:
+                        self._smart_retry(item)
+                    all_success = False
+                    continue
+                    
+                try:
+                    # Préparer payload batch spécialisé
+                    batch_payload = self._format_batch_payload(endpoint_path, items)
+                    url = f"{API_BASE_URL}{endpoint_path}/batch"
+                    
+                    response = requests.post(
+                        url, 
+                        json=batch_payload, 
+                        timeout=15,  # Timeout plus long pour batch
+                        headers={"Content-Type": "application/json"}
+                    )
+                    
+                    if response.status_code == 200:
+                        # ✅ Succès batch - marquer items et reset circuit breaker
+                        self._api_success()  # Reset circuit breaker
+                        for _, item in items:
+                            if item.get("id"):
+                                self.processed_ids.add(item["id"])
+                                if item.get("type") in self.persistent_types:
+                                    self._mark_message_sent(item["id"])
+                    else:
+                        # ❌ Échec batch HTTP - compter comme erreur
+                        self._api_failure()
+                        logger.warning(f"Batch failed for {endpoint_path} (HTTP {response.status_code}), queueing individual retries")
+                        
+                        # ⏳ Pause avant retry pour éviter thundering herd
+                        time.sleep(uniform(0.5, 2.0))
+                        
+                        for _, item in items:
+                            self._smart_retry(item)
+                        all_success = False
+                        
+                except Exception as e:
+                    # ❌ Échec batch réseau/timeout
+                    self._api_failure()
+                    logger.warning(f"Batch endpoint {endpoint_path} failed: {e}")
+                    
+                    # ⏳ Pause avant retry pour éviter surcharge
+                    time.sleep(uniform(1.0, 3.0))
+                    
+                    for _, item in items:
+                        self._smart_retry(item)
+                    all_success = False
+            
+            return all_success
+            
         except Exception as e:
             logger.error(f"Batch API failed: {e}")
-            # Fallback individuel
+            self._api_failure()
+            
+            # ⏳ Pause avant retry pour éviter surcharge
+            time.sleep(uniform(2.0, 5.0))
+            
+            # Fallback individuel avec retry intelligent
             for _, item in batch:
-                self._send_immediately(item)
+                self._smart_retry(item)
+            return False
+
+    def _group_batch_by_endpoint(self, batch):
+        """📊 Regrouper items de batch par endpoint"""
+        endpoint_groups = {}
+        
+        for priority, item in batch:
+            endpoint_info = self._get_api_endpoint(item)
+            endpoint_path = endpoint_info['path']
+            
+            if endpoint_path not in endpoint_groups:
+                endpoint_groups[endpoint_path] = []
+            endpoint_groups[endpoint_path].append((priority, item))
+            
+        return endpoint_groups
+    
+    def _format_batch_payload(self, endpoint_path, items):
+        """📝 Formatter payload batch selon l'endpoint"""
+        batch_items = []
+        
+        for _, item in items:
+            # Réutiliser la logique de formatting individuel
+            endpoint_info = self._get_api_endpoint(item)
+            formatted_item = self._format_api_payload(item, endpoint_info['format'])
+            batch_items.append(formatted_item)
+        
+        return {
+            "batch_id": str(uuid.uuid4()),
+            "batch_timestamp": datetime.now().isoformat(),
+            "item_count": len(batch_items),
+            "endpoint_type": self._extract_endpoint_type(endpoint_path),
+            "items": batch_items
+        }
+    
+    def _extract_endpoint_type(self, endpoint_path):
+        """🏷️ Extraire le type d'endpoint depuis le chemin"""
+        if "/security/" in endpoint_path:
+            return "security_alerts"
+        elif "/processes/" in endpoint_path:
+            return "process_events"
+        elif "/system/" in endpoint_path:
+            return "system_heartbeat"
+        elif "/notifications/" in endpoint_path:
+            return "general_notifications"
+        else:
+            return "generic_events"
 
     def _send_mqtt_batch(self, batch):
         """📡 Envoi batch MQTT"""
@@ -473,13 +905,4 @@ class IntelligentQueueWorker(threading.Thread):
             "data": {
                 k: v for k, v in item.items() if k not in ["id", "type", "created_at"]
             },
-        }
-
-    def _format_api_payload(self, item):
-        """📝 Formatter payload API"""
-        return {
-            "message_id": item.get("id"),
-            "message_type": item.get("type"),
-            "timestamp": item.get("created_at"),
-            "payload": item,
         }

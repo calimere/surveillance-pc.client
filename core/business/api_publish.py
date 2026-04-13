@@ -1,6 +1,6 @@
 import requests
 from core.component.logger import get_logger
-from component import config
+from core.component.config import config
 
 logger = get_logger("mqtt_client")
 API_BASE_URL = config.get("api", "url", fallback="http://localhost:5000/api")

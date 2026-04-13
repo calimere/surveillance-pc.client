@@ -1,7 +1,12 @@
 import time
 
 # from core.authentication import init_authentication
-from core.component.queue_manager import get_queue_worker, stop_queue_worker
+from core.component.queue_manager import (
+    get_queue_worker, 
+    stop_queue_worker, 
+    get_circuit_breaker_status
+)
+from core.component.sync_worker import get_sync_worker, stop_sync_worker, get_sync_stats
 from core.business.db import init_db
 from core.business.running_processes import (
     compute_running_processes_scores,
@@ -66,7 +71,14 @@ if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
 # TODO : queueworker => # alerte temps réel  # - ajouter les messages dans la queue avec un type et des données, et un worker qui traite ces messages en fonction de leur type (ex: notification, mise à jour de processus, etc) et qui publie les messages via MQTT ou API en fonction de la disponibilité de MQTT, et qui gère les erreurs et les retries en cas d'échec de publication, et qui stocke les messages en attente dans une base de données locale pour éviter de perdre des messages en cas de redémarrage du client
 
 
-worker = get_queue_worker()  # Se lance automatiquement
+# 🚀 Démarrage des workers asynchrones
+queue_worker = get_queue_worker()  # Worker pour notifications temps réel
+logger.info("Queue Worker activé pour notifications temps réel")
+
+# 🔄 Démarrage du sync worker pour synchronisation périodique
+sync_interval = config.getint("settings", "tempo_sync", fallback=300)  # 300s par défaut (comme dans config)
+sync_worker = get_sync_worker(sync_interval) 
+logger.info(f"Sync Worker activé avec intervalle de {sync_interval}s")
 
 # 🧠 Démarrage du monitoring mémoire
 start_memory_monitoring()
@@ -92,10 +104,30 @@ try:
             collected = MemoryOptimizer.force_garbage_collection()
             if collected > 0:
                 logger.debug(f"🗑️ {collected} objets nettoyés par le GC")
+            
+            # 🛡️ Vérification circuit breakers plus fréquente si problèmes
+            cb_stats = get_circuit_breaker_status()
+            if cb_stats["api"]["state"] == "open" or cb_stats["mqtt"]["state"] == "open":
+                api_retry = cb_stats["api"]["time_until_retry"]
+                mqtt_retry = cb_stats["mqtt"]["time_until_retry"]
+                logger.warning(f"🚫 Services down - API retry in {api_retry:.0f}s, MQTT retry in {mqtt_retry:.0f}s")
 
-        # 📊 Rapport mémoire périodique (toutes les 100 boucles, ~10 minutes)
+        # 📊 Rapport mémoire et sync périodique (toutes les 100 boucles, ~10 minutes)
         if loop_count % 100 == 0:
             log_memory_report()
+            
+            # 📈 Statistiques de synchronisation
+            sync_stats = get_sync_stats()
+            if sync_stats.get("status") != "not_running":
+                logger.info(f"📊 Sync stats: {sync_stats['total_synced']} synced, {sync_stats['unsync_records']} pending")
+            
+            # 🛡️ Statistiques des circuit breakers
+            cb_stats = get_circuit_breaker_status()
+            if cb_stats["api"]["state"] != "closed" or cb_stats["mqtt"]["state"] != "closed":
+                logger.info(f"🛡️ Circuit breakers - API: {cb_stats['api']['state']} ({cb_stats['api']['failure_count']} failures), MQTT: {cb_stats['mqtt']['state']} ({cb_stats['mqtt']['failure_count']} failures)")
+                if cb_stats["active_retry_threads"] > 0:
+                    logger.info(f"♻️ Active retry threads: {cb_stats['active_retry_threads']}/{cb_stats['max_retry_threads']}")
+            
             loop_count = 0  # Reset pour éviter l'overflow
 
 except KeyboardInterrupt:
@@ -104,6 +136,10 @@ finally:
     # Arrêt propre
     logger.info("Arrêt du système...")
     log_memory_report()  # Rapport final
+    
+    # 🛑 Arrêt des workers dans l'ordre inverse de démarrage
+    stop_sync_worker()
     stop_memory_monitoring()
     stop_queue_worker()
+    
     logger.info("Système arrêté proprement")

@@ -3,12 +3,15 @@ Module de logging centralisé avec rotation horaire des fichiers de log.
 """
 
 import logging
+import os
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
-# Dossier de logs
-LOG_DIR = Path("logs")
-LOG_DIR.mkdir(exist_ok=True)
+# Dossier de logs dans %APPDATA%\surveillance-pc\logs
+# Important : chemin absolu pour le mode service Windows (CWD = C:\Windows\System32)
+_APP_DATA = os.getenv("APPDATA") or os.path.expanduser("~/.config")
+LOG_DIR = Path(_APP_DATA) / "surveillance-pc" / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configuration du logger principal
 logger = logging.getLogger("surveillance")

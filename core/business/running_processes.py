@@ -2,10 +2,10 @@ import datetime
 import psutil
 
 from core.component.queue_manager import (
-    add_notification, 
+    add_notification,
     add_process_instance_created,
     add_process_event_started,
-    add_process_event_stopped
+    add_process_event_stopped,
 )
 from core.enum.EExeEventType import EExeEventType
 from core.business.db import (
@@ -81,6 +81,7 @@ def populate_instances():
 
     logger.info("Population des instances de processus terminée.")
 
+
 def populate_instance(instance):
 
     logger.debug(f"Population de l'instance de processus ID={instance.pri_id}...")
@@ -132,6 +133,7 @@ def populate_instance(instance):
         except:
             pass
 
+
 def handle_new_instances(new_instances, visible_pids):
 
     logger.info(f"{len(new_instances)} nouvelles instances de processus détectées.")
@@ -143,6 +145,23 @@ def handle_new_instances(new_instances, visible_pids):
             weird_path = is_weird_path(exe)
             has_window = pid in visible_pids
 
+            # 🚫 Processus bloqué — tuer immédiatement
+            if getattr(process, "prc_blocked", False):
+                logger.warning(
+                    f"🚫 Processus bloqué détecté : {proc.info['name']} (PID {proc.pid}) — kill forcé"
+                )
+                try:
+                    psutil.Process(proc.pid).kill()
+                except Exception as kill_err:
+                    logger.error(f"❌ Impossible de tuer PID {proc.pid}: {kill_err}")
+                add_notification(
+                    {
+                        "message": f"Processus bloqué tué : {proc.info['name']} (PID {proc.pid})",
+                        "level": "warning",
+                    }
+                )
+                # Créer quand même l'instance + événement pour l'historique
+
             # 1️⃣ Création de l'instance en BDD
             process_instance = add_process_instance(
                 process.prc_id,
@@ -153,33 +172,37 @@ def handle_new_instances(new_instances, visible_pids):
                 has_window,
                 weird_path,
             )
-            
+
             # 📊 Notification instance créée
-            add_process_instance_created({
-                "instance_id": process_instance.pri_id,
-                "process_name": proc.info["name"],
-                "pid": proc.pid,
-                "ppid": ppid,
-                "exe": proc.info["exe"],
-                "has_window": has_window,
-                "timestamp": datetime.datetime.now(),
-            })
-            
-            # 2️⃣ Création de l'événement START 
+            add_process_instance_created(
+                {
+                    "instance_id": process_instance.pri_id,
+                    "process_name": proc.info["name"],
+                    "pid": proc.pid,
+                    "ppid": ppid,
+                    "exe": proc.info["exe"],
+                    "has_window": has_window,
+                    "timestamp": datetime.datetime.now(),
+                }
+            )
+
+            # 2️⃣ Création de l'événement START
             add_event(
                 process_instance.pri_id, EExeEventType.START, datetime.datetime.now()
             )
-            
+
             # 📊 Notification événement démarré
-            add_process_event_started({
-                "instance_id": process_instance.pri_id,
-                "process_name": proc.info["name"],
-                "pid": proc.pid,
-                "ppid": ppid,
-                "exe": proc.info["exe"],
-                "has_window": has_window,
-                "timestamp": datetime.datetime.now(),
-            })
+            add_process_event_started(
+                {
+                    "instance_id": process_instance.pri_id,
+                    "process_name": proc.info["name"],
+                    "pid": proc.pid,
+                    "ppid": ppid,
+                    "exe": proc.info["exe"],
+                    "has_window": has_window,
+                    "timestamp": datetime.datetime.now(),
+                }
+            )
 
         except Exception as e:
             logger.error(
@@ -187,6 +210,7 @@ def handle_new_instances(new_instances, visible_pids):
             )
 
     logger.info(f"Traitement des nouvelles instances terminé.")
+
 
 def scan_running_processes():
 
@@ -251,13 +275,12 @@ def scan_running_processes():
                 process = get_process_by_name(name, exe)
 
                 if process is None:
-                    
                     if exe == "":
                         logger.warning(
                             f"Processus '{name}' sans chemin d'accès, impossible de l'ajouter à la base de données."
                         )
                         continue
-                    else :
+                    else:
                         process = add_process(name, exe)
                         logger.info(f"Nouveau processus détecté : {name}")
                         new_processes.append(process)
@@ -277,15 +300,16 @@ def scan_running_processes():
 
     # Traiter les nouvelles instances après avoir collecté toutes les infos
     handle_new_instances(new_instances, visible_pids)
-    
+
     stopped_count = handle_stopped_instances(seen_instances)
 
     logger.debug(
         f"Scan terminé. {len(new_instances)} nouvelles instances, {stopped_count} arrêtées."
     )
 
+
 def handle_stopped_instances(seen_instances):
-    
+
     # Identifier et traiter les processus arrêtés en batch
     running_instances = get_running_instances()
     stopped_count = 0
@@ -298,7 +322,6 @@ def handle_stopped_instances(seen_instances):
 
     for instance in running_instances:
         if (instance.pri_pid, instance.pri_start_time) not in seen_instances:
-            
             # 3️⃣ Préparer l'événement STOP
             stop_events.append(
                 {
@@ -308,20 +331,22 @@ def handle_stopped_instances(seen_instances):
                 }
             )
             instances_to_stop.append(instance.pri_id)
-            
+
             # Récupérer les infos du processus pour la notification
             process = get_process_by_id(instance.prc_id)
             if process:
-                stopped_notifications.append({
-                    "instance_id": instance.pri_id,
-                    "process_name": process.prc_name,
-                    "pid": instance.pri_pid,
-                    "ppid": instance.pri_ppid,
-                    "exe": process.prc_path,
-                    "has_window": instance.pri_has_window,
-                    "timestamp": now,
-                })
-            
+                stopped_notifications.append(
+                    {
+                        "instance_id": instance.pri_id,
+                        "process_name": process.prc_name,
+                        "pid": instance.pri_pid,
+                        "ppid": instance.pri_ppid,
+                        "exe": process.prc_path,
+                        "has_window": instance.pri_has_window,
+                        "timestamp": now,
+                    }
+                )
+
             stopped_count += 1
 
     # Insérer tous les événements STOP en une seule transaction
@@ -331,7 +356,7 @@ def handle_stopped_instances(seen_instances):
         # Mettre à jour le statut des instances
         for pri_id in instances_to_stop:
             stop_process_instance(pri_id)
-            
+
         # 📊 Envoyer toutes les notifications STOP
         for notification_data in stopped_notifications:
             add_process_event_stopped(notification_data)
@@ -339,7 +364,8 @@ def handle_stopped_instances(seen_instances):
     if stopped_count > 0:
         logger.info(f"{stopped_count} processus arrêté(s) détecté(s)")
 
-    return stopped_count    
+    return stopped_count
+
 
 def base_compute(instances):
 
@@ -393,15 +419,18 @@ def base_compute(instances):
 
         update_process_instance_score(instance.pri_id, score)
 
+
 def compute_running_processes_scores():
 
     instances = get_running_instances_without_score()
     base_compute(instances)  # pour construire les structures parents/enfants
 
+
 def compute_scores():
 
     instances = get_not_compute_process_instance()
     base_compute(instances)
+
 
 def calculate_risk_score(instance, child_instances, parent_instances):
 

@@ -1,10 +1,12 @@
 import time
+import psutil
 
 # from core.authentication import init_authentication
 from core.component.queue_manager import (
-    get_queue_worker, 
-    stop_queue_worker, 
-    get_circuit_breaker_status
+    get_queue_worker,
+    stop_queue_worker,
+    get_circuit_breaker_status,
+    add_heartbeat,
 )
 from core.component.sync_worker import get_sync_worker, stop_sync_worker, get_sync_stats
 from core.business.db import init_db
@@ -76,8 +78,10 @@ queue_worker = get_queue_worker()  # Worker pour notifications temps réel
 logger.info("Queue Worker activé pour notifications temps réel")
 
 # 🔄 Démarrage du sync worker pour synchronisation périodique
-sync_interval = config.getint("settings", "tempo_sync", fallback=300)  # 300s par défaut (comme dans config)
-sync_worker = get_sync_worker(sync_interval) 
+sync_interval = config.getint(
+    "settings", "tempo_sync", fallback=300
+)  # 300s par défaut (comme dans config)
+sync_worker = get_sync_worker(sync_interval)
 logger.info(f"Sync Worker activé avec intervalle de {sync_interval}s")
 
 # 🧠 Démarrage du monitoring mémoire
@@ -85,6 +89,13 @@ start_memory_monitoring()
 logger.info("Monitoring mémoire activé")
 
 # main loop
+
+add_heartbeat(
+    {
+        "cpu_usage": psutil.cpu_percent(interval=None),
+        "memory_usage": psutil.virtual_memory().percent,
+    }
+)
 
 try:
     loop_count = 0
@@ -104,30 +115,43 @@ try:
             collected = MemoryOptimizer.force_garbage_collection()
             if collected > 0:
                 logger.debug(f"🗑️ {collected} objets nettoyés par le GC")
-            
-            # 🛡️ Vérification circuit breakers plus fréquente si problèmes
+
+            # 🛡️ Vérification circuit breaker MQTT
             cb_stats = get_circuit_breaker_status()
-            if cb_stats["api"]["state"] == "open" or cb_stats["mqtt"]["state"] == "open":
-                api_retry = cb_stats["api"]["time_until_retry"]
+            if cb_stats["mqtt"]["state"] == "open":
                 mqtt_retry = cb_stats["mqtt"]["time_until_retry"]
-                logger.warning(f"🚫 Services down - API retry in {api_retry:.0f}s, MQTT retry in {mqtt_retry:.0f}s")
+                logger.warning(f"🚫 MQTT down — retry in {mqtt_retry:.0f}s")
 
         # 📊 Rapport mémoire et sync périodique (toutes les 100 boucles, ~10 minutes)
         if loop_count % 100 == 0:
             log_memory_report()
-            
+
+            # 💓 Heartbeat système
+            add_heartbeat(
+                {
+                    "cpu_usage": psutil.cpu_percent(interval=None),
+                    "memory_usage": psutil.virtual_memory().percent,
+                }
+            )
+
             # 📈 Statistiques de synchronisation
             sync_stats = get_sync_stats()
             if sync_stats.get("status") != "not_running":
-                logger.info(f"📊 Sync stats: {sync_stats['total_synced']} synced, {sync_stats['unsync_records']} pending")
-            
-            # 🛡️ Statistiques des circuit breakers
+                logger.info(
+                    f"📊 Sync stats: {sync_stats['total_synced']} synced, {sync_stats['unsync_records']} pending"
+                )
+
+            # 🛡️ Statistiques circuit breaker MQTT
             cb_stats = get_circuit_breaker_status()
-            if cb_stats["api"]["state"] != "closed" or cb_stats["mqtt"]["state"] != "closed":
-                logger.info(f"🛡️ Circuit breakers - API: {cb_stats['api']['state']} ({cb_stats['api']['failure_count']} failures), MQTT: {cb_stats['mqtt']['state']} ({cb_stats['mqtt']['failure_count']} failures)")
+            if cb_stats["mqtt"]["state"] != "closed":
+                logger.info(
+                    f"🛡️ MQTT circuit breaker: {cb_stats['mqtt']['state']} ({cb_stats['mqtt']['failure_count']} failures)"
+                )
                 if cb_stats["active_retry_threads"] > 0:
-                    logger.info(f"♻️ Active retry threads: {cb_stats['active_retry_threads']}/{cb_stats['max_retry_threads']}")
-            
+                    logger.info(
+                        f"♻️ Active retry threads: {cb_stats['active_retry_threads']}/{cb_stats['max_retry_threads']}"
+                    )
+
             loop_count = 0  # Reset pour éviter l'overflow
 
 except KeyboardInterrupt:
@@ -136,10 +160,10 @@ finally:
     # Arrêt propre
     logger.info("Arrêt du système...")
     log_memory_report()  # Rapport final
-    
+
     # 🛑 Arrêt des workers dans l'ordre inverse de démarrage
     stop_sync_worker()
     stop_memory_monitoring()
     stop_queue_worker()
-    
+
     logger.info("Système arrêté proprement")

@@ -117,6 +117,7 @@ class Queue(BaseModel):
     created = DateTimeField(default=datetime.datetime.now)
     que_status = TextField(default="pending")  # pending, sent, failed
     que_priority = IntegerField(default=5)  # 1=urgent, 9=faible, 5=normal
+    que_updated = DateTimeField(default=datetime.datetime.now)
 
     class Meta:
         table_name = "queue"
@@ -190,11 +191,6 @@ def cleanup_old_queue_messages(sent_older_than_hours=24, failed_older_than_hours
     Queue.delete().where(
         (Queue.que_status == "failed") & (Queue.que_updated < cutoff_failed)
     ).execute()
-    db.init(get_db_path())
-    queue_item = Queue.create(
-        que_type=queue_type, que_data=queue_data, created=datetime.datetime.now()
-    )
-    return queue_item
 
 
 def get_running_processes():
@@ -248,7 +244,9 @@ def get_process_by_name(name, path):
             prc = Process.get((Process.prc_name == name) & (Process.prc_path == path))
             return prc
         else:
-            logger.warning(f"Impossible de récupérer le processus '{name}' sans chemin.")
+            logger.warning(
+                f"Impossible de récupérer le processus '{name}' sans chemin."
+            )
             return None
     except DoesNotExist:
         return None

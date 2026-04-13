@@ -6,6 +6,7 @@ Singleton pattern pour accès depuis tout le projet
 from core.component.queue_worker import IntelligentQueueWorker
 from core.component.logger import get_logger
 from core.enum.EQueueType import EQueueType
+from core.business.db import Queue
 
 logger = get_logger("queue_manager")
 
@@ -54,6 +55,7 @@ def add_security_alert(process_name: str, score: int, details: dict = None):
     data = {"process_name": process_name, "risk_score": score, "details": details or {}}
     add_notification(EQueueType.SECURITY_ALERT, data, priority=1)
 
+
 def add_process_instance_created(instance_data: dict):
     """🆕 Helper pour nouvelle instance de processus créée en BDD"""
     data = {
@@ -66,7 +68,7 @@ def add_process_instance_created(instance_data: dict):
 def add_process_event_started(instance_data: dict):
     """▶️ Helper pour événement START d'une instance"""
     data = {
-        "action": "process_started", 
+        "action": "process_started",
         "instance": instance_data,
     }
     add_notification(EQueueType.PROCESS_EVENT, data, priority=3)
@@ -98,6 +100,71 @@ def stop_queue_worker():
         logger.info("Queue Worker arrêté")
 
 
+def get_queue_stats() -> dict:
+    """
+    🔍 Diagnostic complet de la queue — mémoire + base de données
+
+    Retourne:
+        - Taille de la queue en mémoire
+        - Comptage des messages par statut en DB (pending/processing/sent/failed)
+        - État des circuit breakers
+        - Threads de retry actifs
+    """
+    worker = get_queue_worker()
+
+    # --- Queue en mémoire ---
+    memory_size = worker.queue.qsize()
+
+    # --- Messages en DB par statut ---
+    db_stats = {"pending": 0, "processing": 0, "sent": 0, "failed": 0}
+    try:
+        for status in db_stats:
+            db_stats[status] = Queue.select().where(Queue.que_status == status).count()
+    except Exception as e:
+        logger.warning(f"Impossible de lire les stats DB: {e}")
+
+    # --- Derniers messages échoués ---
+    recent_failures = []
+    try:
+        rows = (
+            Queue.select()
+            .where(Queue.que_status == "failed")
+            .order_by(Queue.created.desc())
+            .limit(5)
+        )
+        for row in rows:
+            recent_failures.append(
+                {
+                    "id": row.que_id,
+                    "type": row.que_type,
+                    "created": str(row.created),
+                    "priority": row.que_priority,
+                }
+            )
+    except Exception as e:
+        logger.warning(f"Impossible de lire les échecs récents: {e}")
+
+    # --- Circuit breakers + threads ---
+    cb = worker.get_circuit_breaker_status()
+
+    stats = {
+        "memory_queue_size": memory_size,
+        "db": db_stats,
+        "recent_failures": recent_failures,
+        "circuit_breakers": cb,
+        "worker_running": worker.running,
+    }
+
+    logger.info(
+        f"📊 Queue stats — mémoire: {memory_size} | "
+        f"DB: pending={db_stats['pending']} processing={db_stats['processing']} "
+        f"failed={db_stats['failed']} sent={db_stats['sent']} | "
+        f"MQTT={cb['mqtt']['state']}"
+    )
+
+    return stats
+
+
 def get_circuit_breaker_status():
     """📊 Obtenir le statut des circuit breakers"""
     worker = get_queue_worker()
@@ -107,26 +174,16 @@ def get_circuit_breaker_status():
 def reset_circuit_breakers():
     """🔄 Reset force des circuit breakers (pour dépannage)"""
     worker = get_queue_worker()
-    
-    # Reset API circuit breaker
-    worker.api_circuit_breaker = {
-        "state": "closed",
-        "failure_count": 0,
-        "last_failure": None,
-        "timeout": 30,
-        "failure_threshold": 5,
-        "next_retry": 0
-    }
-    
-    # Reset MQTT circuit breaker  
+
+    # Reset MQTT circuit breaker
     worker.mqtt_circuit_breaker = {
         "state": "closed",
         "failure_count": 0,
         "last_failure": None,
         "timeout": 15,
         "failure_threshold": 3,
-        "next_retry": 0
+        "next_retry": 0,
     }
-    
+
     logger.info("🔄 Circuit breakers manually reset")
     return True

@@ -6,3 +6,5 @@ class EQueueType(enum.Enum):
     NOTIFICATION = "notification"
     HEARTBEAT = "heartbeat"
     PROCESS_EVENT = "process_event"
+    PROCESS = "process"
+    PROCESS_INSTANCE = "process_instance"

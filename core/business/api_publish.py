@@ -1,4 +1,5 @@
 import requests
+from datetime import datetime, date
 from core.component.logger import get_logger
 from core.component.config import config
 from core.component.authentication import generate_client_id
@@ -12,12 +13,23 @@ def _cid() -> str:
     return generate_client_id()
 
 
+def _serialize(obj: dict) -> dict:
+    """Convertit les objets datetime en chaînes ISO pour la sérialisation JSON."""
+    result = {}
+    for k, v in obj.items():
+        if isinstance(v, (datetime, date)):
+            result[k] = v.isoformat()
+        else:
+            result[k] = v
+    return result
+
+
 def add_processes(processes: list) -> bool:
     """POST /api/processes/add"""
     try:
         payload = {
             "client_id": _cid(),
-            "processes": [p.__dict__ for p in processes],
+            "processes": [_serialize(p.__data__) for p in processes],
         }
         r = requests.post(
             f"{API_BASE_URL}/processes/add", json=payload, headers=_HEADERS, timeout=5
@@ -37,7 +49,7 @@ def add_process_instances(instances: list) -> bool:
     try:
         payload = {
             "client_id": _cid(),
-            "instances": [i.__dict__ for i in instances],
+            "instances": [_serialize(i.__data__) for i in instances],
         }
         r = requests.post(
             f"{API_BASE_URL}/process_instances/add",
@@ -60,7 +72,7 @@ def add_process_events(events: list) -> bool:
     try:
         payload = {
             "client_id": _cid(),
-            "events": [e.__dict__ for e in events],
+            "events": [_serialize(e.__data__) for e in events],
         }
         r = requests.post(
             f"{API_BASE_URL}/process_events/add",
@@ -75,4 +87,27 @@ def add_process_events(events: list) -> bool:
         return False
     except Exception as e:
         logger.error(f"❌ add_process_events: {e}")
+        return False
+
+
+def add_security_alerts(alerts: list) -> bool:
+    """POST /api/security/alerts"""
+    try:
+        payload = {
+            "client_id": _cid(),
+            "alerts": [_serialize(a.__data__) for a in alerts],
+        }
+        r = requests.post(
+            f"{API_BASE_URL}/security/alerts",
+            json=payload,
+            headers=_HEADERS,
+            timeout=5,
+        )
+        if r.status_code == 200:
+            logger.info(f"✅ {len(alerts)} alertes de sécurité envoyées")
+            return True
+        logger.warning(f"⚠️ /security/alerts → HTTP {r.status_code}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ add_security_alerts: {e}")
         return False

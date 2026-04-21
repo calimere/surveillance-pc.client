@@ -7,4 +7,4 @@ pyinstaller
 configparser
 peewee
 wmi
-pefile
+pefilePillow

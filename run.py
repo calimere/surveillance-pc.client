@@ -54,7 +54,6 @@ if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
     init_mqtt()  # initialize mqtt client
     subscribe("surveillance/[client]/cmd", handle_surveillance_cmd)
     subscribe("surveillance/[client]/ack", handle_surveillance_ack)
-    publish("surveillance/[client]/uptime")
 
 # faire la synchro des exe avec le serveur distant
 # stocker la dernière date de synchro sur le serveur distant

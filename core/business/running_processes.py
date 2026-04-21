@@ -6,6 +6,7 @@ from core.component.queue_manager import (
     add_process_instance_created,
     add_process_event_started,
     add_process_event_stopped,
+    add_process_detected,
 )
 from core.enum.EExeEventType import EExeEventType
 from core.business.db import (
@@ -13,6 +14,7 @@ from core.business.db import (
     add_events_batch,
     add_process,
     add_process_instance,
+    add_security_alert,
     get_non_populate_process_instance,
     get_not_compute_process_instance,
     get_process_by_id,
@@ -30,6 +32,7 @@ from core.business.process import (
     get_visible_window_pids,
     is_weird_path,
     get_file_signer_with_timeout,
+    get_process_icon_base64,
 )
 from core.enum.EQueueType import EQueueType
 from core.business.process import get_owner_for_pid_cached
@@ -285,6 +288,18 @@ def scan_running_processes():
                         logger.info(f"Nouveau processus détecté : {name}")
                         new_processes.append(process)
                         process_cache[cache_key] = process
+                        # 📊 Notification MQTT nouveau processus jamais vu
+                        add_process_detected(
+                            {
+                                "prc_id": process.prc_id,
+                                "process_name": process.prc_name,
+                                "exe": process.prc_path,
+                                "icon_base64": get_process_icon_base64(
+                                    process.prc_path
+                                ),
+                                "timestamp": datetime.datetime.now().isoformat(),
+                            }
+                        )
             else:
                 process = process_cache[cache_key]
 
@@ -386,6 +401,8 @@ def base_compute(instances):
 
     for instance in instances:
         score = calculate_risk_score(instance, children, parents)
+        process = get_process_by_id(instance.prc_id)
+        process_name = process.prc_name if process else "unknown"
 
         # ALARME IMMEDIATE SI SCORE TRES ELEVE
         if score > 10:  # seuil à ajuster
@@ -395,10 +412,10 @@ def base_compute(instances):
             add_notification(
                 EQueueType.NOTIFICATION,
                 {
-                    "instance_id": instance.id,
+                    "instance_id": instance.pri_id,
                     "score": score,
-                    "process_name": instance.name,
-                    "timestamp": datetime.datetime.now(),
+                    "process_name": process_name,
+                    "timestamp": datetime.datetime.now().isoformat(),
                 },
             )
 
@@ -407,15 +424,28 @@ def base_compute(instances):
             logger.error(
                 f"Instance de processus très suspecte détectée: PID={instance.pri_pid}, Score={score}"
             )
-            add_notification(
-                EQueueType.SECURITY_ALERT,
-                {
-                    "instance_id": instance.id,
-                    "score": score,
-                    "process_name": instance.name,
-                    "timestamp": datetime.datetime.now(),
-                },
-            )
+            # 💾 Persister l'alerte en base avant l'envoi MQTT
+            try:
+                alert = add_security_alert(
+                    pri_id=instance.pri_id,
+                    prc_id=instance.prc_id,
+                    process_name=process_name,
+                    risk_score=score,
+                    details={"pid": instance.pri_pid, "ppid": instance.pri_ppid},
+                )
+                add_notification(
+                    EQueueType.SECURITY_ALERT,
+                    {
+                        "ale_id": alert.ale_id,
+                        "instance_id": instance.pri_id,
+                        "prc_id": instance.prc_id,
+                        "score": score,
+                        "process_name": process_name,
+                        "timestamp": datetime.datetime.now().isoformat(),
+                    },
+                )
+            except Exception as e:
+                logger.error(f"❌ Erreur lors de la persistance de l'alerte: {e}")
 
         update_process_instance_score(instance.pri_id, score)
 

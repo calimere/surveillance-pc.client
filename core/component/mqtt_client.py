@@ -126,8 +126,10 @@ def publish(topic: str, payload: str = None, qos: int = 0, retain: bool = False)
                     payload = str(payload)
 
         _client.publish(topic, payload, qos=qos, retain=retain)
+        return True
     else:
         logger.error("❌ Client MQTT non initialisé !")
+        return None
 
 
 def subscribe(topic: str, handler=None, qos: int = 0):

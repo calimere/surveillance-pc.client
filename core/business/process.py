@@ -5,6 +5,8 @@ import os
 import subprocess
 import threading
 import time
+import base64
+import io
 from core.component.logger import get_logger
 
 logger = get_logger("process")
@@ -414,4 +416,70 @@ def is_weird_path(path: str):
         "\\startup\\",
         "\\start menu\\programs\\startup\\",
     ]
+
+
+def get_process_icon_base64(exe_path: str) -> str | None:
+    """Extraire l'icône d'un exécutable et la retourner en base64 PNG.
+    Retourne None si l'icône ne peut pas être extraite.
+    """
+    try:
+        if not exe_path or not os.path.isfile(exe_path):
+            return None
+
+        import win32ui
+        import win32con
+        import win32api
+        from PIL import Image
+
+        # Extraire l'icône via l'API Win32
+        large, small = win32gui.ExtractIconEx(exe_path, 0)
+        if not large:
+            return None
+
+        hicon = large[0]
+
+        # Créer un DC et bitmap pour dessiner l'icône
+        hdc = win32ui.CreateDCFromHandle(win32gui.GetDC(0))
+        hbmp = win32ui.CreateBitmap()
+        hbmp.CreateCompatibleBitmap(hdc, 32, 32)
+        hdc_mem = hdc.CreateCompatibleDC()
+        hdc_mem.SelectObject(hbmp)
+
+        # Fond blanc
+        hdc_mem.FillSolidRect((0, 0, 32, 32), win32api.RGB(255, 255, 255))
+        win32gui.DrawIconEx(
+            hdc_mem.GetSafeHdc(), 0, 0, hicon, 32, 32, 0, None, win32con.DI_NORMAL
+        )
+
+        # Récupérer les pixels bitmap
+        bmp_info = hbmp.GetInfo()
+        bmp_bits = hbmp.GetBitmapBits(True)
+
+        # Libérer les ressources Win32
+        win32gui.DestroyIcon(hicon)
+        if len(large) > 1:
+            for h in large[1:]:
+                win32gui.DestroyIcon(h)
+        for h in small:
+            win32gui.DestroyIcon(h)
+        hdc_mem.DeleteDC()
+        hdc.DeleteDC()
+
+        # Convertir en image PIL puis en base64 PNG
+        img = Image.frombuffer(
+            "RGB",
+            (bmp_info["bmWidth"], bmp_info["bmHeight"]),
+            bmp_bits,
+            "raw",
+            "BGRX",
+            0,
+            1,
+        )
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    except Exception as e:
+        logger.debug(f"Impossible d'extraire l'icône de '{exe_path}': {e}")
+        return None
     return any(k in p for k in keywords)

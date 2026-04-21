@@ -9,11 +9,19 @@ import datetime
 import json
 from typing import List, Dict, Any
 from core.component.logger import get_logger
-from core.business.db import Process, ProcessInstance, ProcessEvent, Config, Queue
+from core.business.db import (
+    Process,
+    ProcessInstance,
+    ProcessEvent,
+    Config,
+    Queue,
+    SecurityAlert,
+)
 from core.business.api_publish import (
     add_processes,
     add_process_instances,
     add_process_events,
+    add_security_alerts,
 )
 
 logger = get_logger("sync_worker")
@@ -72,13 +80,68 @@ class SyncWorker(threading.Thread):
         """Synchronise toutes les tables avec données non synchronisées"""
         total_synced = 0
 
-        # Ordre de priorité : Events > Instances > Processes
-        # Les événements sont plus urgents que les métadonnées
+        # Ordre de priorité : Alertes > Events > Instances > Processes
+        total_synced += self._sync_security_alerts()
         total_synced += self._sync_process_events()
         total_synced += self._sync_process_instances()
         total_synced += self._sync_processes()
 
         return total_synced
+
+    def _sync_security_alerts(self) -> int:
+        """Synchronise les alertes de sécurité non synchronisées"""
+        try:
+            unsync_alerts = list(
+                SecurityAlert.select()
+                .where(
+                    (SecurityAlert.sync_status == 0) | (SecurityAlert.sync_status == 2)
+                )
+                .limit(50)
+            )
+
+            if not unsync_alerts:
+                return 0
+
+            logger.debug(
+                f"🔄 Synchronisation de {len(unsync_alerts)} alertes de sécurité..."
+            )
+
+            synced_count = 0
+            for alert in unsync_alerts:
+                if self._should_retry(f"alert_{alert.ale_id}"):
+                    try:
+                        if self._sync_single_alert(alert):
+                            alert.sync_status = 1
+                            alert.sync_timestamp = datetime.datetime.now()
+                            alert.save()
+                            synced_count += 1
+                            self._clear_backoff(f"alert_{alert.ale_id}")
+                        else:
+                            alert.sync_status = 2
+                            alert.sync_timestamp = datetime.datetime.now()
+                            alert.save()
+                            self._add_backoff(f"alert_{alert.ale_id}")
+
+                    except Exception as e:
+                        logger.error(f"❌ Erreur sync alerte {alert.ale_id}: {e}")
+                        alert.sync_status = 2
+                        alert.sync_timestamp = datetime.datetime.now()
+                        alert.save()
+                        self._add_backoff(f"alert_{alert.ale_id}")
+
+            return synced_count
+
+        except Exception as e:
+            logger.error(f"❌ Erreur lors de la sync des alertes: {e}")
+            return 0
+
+    def _sync_single_alert(self, alert: SecurityAlert) -> bool:
+        """Synchronise une alerte individuelle via HTTP"""
+        try:
+            return add_security_alerts([alert])
+        except Exception as e:
+            logger.debug(f"Échec sync alerte {alert.ale_id}: {e}")
+            return False
 
     def _sync_processes(self) -> int:
         """Synchronise les processus non synchronisés"""
@@ -299,6 +362,11 @@ class SyncWorker(threading.Thread):
                 "events": ProcessEvent.select()
                 .where(
                     (ProcessEvent.sync_status == 0) | (ProcessEvent.sync_status == 2)
+                )
+                .count(),
+                "security_alerts": SecurityAlert.select()
+                .where(
+                    (SecurityAlert.sync_status == 0) | (SecurityAlert.sync_status == 2)
                 )
                 .count(),
                 "queue": Queue.select()

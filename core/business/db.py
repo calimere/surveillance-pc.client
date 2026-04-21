@@ -123,6 +123,19 @@ class Queue(BaseModel):
         table_name = "queue"
 
 
+class SecurityAlert(BaseModel):
+    ale_id = AutoField(primary_key=True)
+    pri_id = ForeignKeyField(ProcessInstance, column_name="pri_id", null=True)
+    prc_id = ForeignKeyField(Process, column_name="prc_id", null=True)
+    ale_process_name = TextField()
+    ale_risk_score = IntegerField()
+    ale_timestamp = DateTimeField()
+    ale_details = TextField(null=True)  # JSON sérialisé
+
+    class Meta:
+        table_name = "security_alert"
+
+
 # ------------------------------------------------------------------#
 
 
@@ -142,7 +155,9 @@ def init_db():
 
     db.init(get_db_path())
     db.connect()
-    db.create_tables([Process, ProcessInstance, ProcessEvent, Config, Queue])
+    db.create_tables(
+        [Process, ProcessInstance, ProcessEvent, Config, Queue, SecurityAlert]
+    )
     # Ne pas fermer la connexion ici - elle sera réutilisée
 
     logger.info(f"Base de données créée à {get_db_path()}.")
@@ -172,15 +187,19 @@ def get_pending_queue_messages():
 
 def update_queue_status(message_id, status, updated_at=None):
     """Mettre à jour statut"""
-    Queue.update(que_status=status, que_updated=updated_at or datetime.now()).where(
-        Queue.que_id == message_id
-    ).execute()
+    Queue.update(
+        que_status=status, que_updated=updated_at or datetime.datetime.now()
+    ).where(Queue.que_id == message_id).execute()
 
 
 def cleanup_old_queue_messages(sent_older_than_hours=24, failed_older_than_hours=168):
     """Nettoyage automatique"""
-    cutoff_sent = datetime.now() - datetime.timedelta(hours=sent_older_than_hours)
-    cutoff_failed = datetime.now() - datetime.timedelta(hours=failed_older_than_hours)
+    cutoff_sent = datetime.datetime.now() - datetime.timedelta(
+        hours=sent_older_than_hours
+    )
+    cutoff_failed = datetime.datetime.now() - datetime.timedelta(
+        hours=failed_older_than_hours
+    )
 
     # Supprimer messages envoyés anciens
     Queue.delete().where(
@@ -191,6 +210,29 @@ def cleanup_old_queue_messages(sent_older_than_hours=24, failed_older_than_hours
     Queue.delete().where(
         (Queue.que_status == "failed") & (Queue.que_updated < cutoff_failed)
     ).execute()
+
+
+def add_security_alert(pri_id, prc_id, process_name, risk_score, details=None):
+    """Enregistrer une alerte de sécurité en base"""
+    db.init(get_db_path())
+    return SecurityAlert.create(
+        pri_id=pri_id,
+        prc_id=prc_id,
+        ale_process_name=process_name,
+        ale_risk_score=risk_score,
+        ale_timestamp=datetime.datetime.now(),
+        ale_details=json.dumps(details) if details else None,
+    )
+
+
+def get_unsync_security_alerts():
+    """Récupérer les alertes non synchronisées"""
+    db.init(get_db_path())
+    return list(
+        SecurityAlert.select()
+        .where((SecurityAlert.sync_status == 0) | (SecurityAlert.sync_status == 2))
+        .limit(50)
+    )
 
 
 def get_running_processes():

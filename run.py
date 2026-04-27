@@ -9,6 +9,11 @@ from core.component.queue_manager import (
     add_heartbeat,
 )
 from core.component.sync_worker import get_sync_worker, stop_sync_worker, get_sync_stats
+from core.component.bidirectional_sync_worker import (
+    get_bidirectional_sync_worker,
+    stop_bidirectional_sync_worker,
+    get_bidirectional_sync_stats
+)
 from core.business.db import init_db
 from core.business.running_processes import (
     compute_running_processes_scores,
@@ -19,7 +24,12 @@ from core.business.running_processes import (
 from core.component.notification import send_discord_notification
 from core.component.config import config, get_pc_alias
 from core.component.mqtt_client import generate_client_id, init_mqtt, publish, subscribe
-from core.business.mqtt_handlers import handle_surveillance_cmd, handle_surveillance_ack
+from core.business.mqtt_handlers import (
+    handle_surveillance_cmd,
+    handle_surveillance_ack,
+    handle_server_changes,
+    handle_sync_request
+)
 from core.component.logger import get_logger
 from core.component.memory_monitor import (
     start_memory_monitoring,
@@ -54,6 +64,11 @@ if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
     init_mqtt()  # initialize mqtt client
     subscribe("surveillance/[client]/cmd", handle_surveillance_cmd)
     subscribe("surveillance/[client]/ack", handle_surveillance_ack)
+    
+    # Abonnements pour synchronisation bidirectionnelle
+    subscribe("surveillance/[client]/server_changes", handle_server_changes)
+    subscribe("surveillance/[client]/sync_request", handle_sync_request)
+    logger.info("📡 MQTT topics sync bidirectionnel configurés")
 
 # faire la synchro des exe avec le serveur distant
 # stocker la dernière date de synchro sur le serveur distant
@@ -61,16 +76,6 @@ if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
 # ajouter la possibilité de fermer un processus à distance via mqtt
 # ajouter la possibilité de lancer un processus à distance via mqtt
 # vérifier régulièrement si mqtt est disponible et republier les messages en attente dans la queue via API
-
-
-# TODO : ajouter un système de queue pour les messages MQTT si MQTT n'est pas disponible, et republier ces messages en attente via MQTT dès que MQTT est disponible, ou via API si MQTT n'est pas disponible depuis trop longtemps
-# TODO : le système de queue doit être asynchrone et ne pas bloquer la boucle principale, et doit stocker les messages en attente dans une base de données locale pour éviter de perdre des messages en cas de redémarrage du client
-# TODO : la queue doit être un thread à part
-# TODO : si le score est élevé, envoyer une notification via Discord et MQTT sans passer par la queue pour éviter les délais, et ajouter une logique de throttling pour éviter d'envoyer trop de notifications en cas de score élevé récurrent
-
-# TODO : syncworker  => # synchro périodique # - flag dans les tables pour dire si c'est synchronisé ou pas, et une API pour forcer la synchro d'une instance ou d'un processus, et une logique de synchro régulière pour éviter les désynchronisations
-# TODO : queueworker => # alerte temps réel  # - ajouter les messages dans la queue avec un type et des données, et un worker qui traite ces messages en fonction de leur type (ex: notification, mise à jour de processus, etc) et qui publie les messages via MQTT ou API en fonction de la disponibilité de MQTT, et qui gère les erreurs et les retries en cas d'échec de publication, et qui stocke les messages en attente dans une base de données locale pour éviter de perdre des messages en cas de redémarrage du client
-
 
 # 🚀 Démarrage des workers asynchrones
 queue_worker = get_queue_worker()  # Worker pour notifications temps réel
@@ -82,6 +87,14 @@ sync_interval = config.getint(
 )  # 300s par défaut (comme dans config)
 sync_worker = get_sync_worker(sync_interval)
 logger.info(f"Sync Worker activé avec intervalle de {sync_interval}s")
+
+# 🔄 Démarrage du sync bidirectionnel (serveur → client)
+bidirectional_sync_interval = config.getint(
+    "settings", "bidirectional_sync_interval", fallback=600
+)  # 10 minutes par défaut
+bidirectional_sync_worker = get_bidirectional_sync_worker(bidirectional_sync_interval)
+bidirectional_sync_worker.start()
+logger.info(f"🔄 Sync Bidirectionnel activé avec intervalle de {bidirectional_sync_interval}s")
 
 # 🧠 Démarrage du monitoring mémoire
 start_memory_monitoring()
@@ -139,6 +152,14 @@ try:
                 logger.info(
                     f"📊 Sync stats: {sync_stats['total_synced']} synced, {sync_stats['unsync_records']} pending"
                 )
+            
+            # 📊 Statistiques sync bidirectionnel
+            bidirectional_stats = get_bidirectional_sync_stats()
+            if bidirectional_stats.get("is_running"):
+                logger.info(
+                    f"🔄 Bidirectional sync: {bidirectional_stats.get('server_changes_applied', 0)} applied, "
+                    f"{bidirectional_stats.get('conflicts_resolved', 0)} conflicts resolved"
+                )
 
             # 🛡️ Statistiques circuit breaker MQTT
             cb_stats = get_circuit_breaker_status()
@@ -161,6 +182,7 @@ finally:
     log_memory_report()  # Rapport final
 
     # 🛑 Arrêt des workers dans l'ordre inverse de démarrage
+    stop_bidirectional_sync_worker()
     stop_sync_worker()
     stop_memory_monitoring()
     stop_queue_worker()

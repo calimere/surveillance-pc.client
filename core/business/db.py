@@ -172,15 +172,19 @@ def get_pending_queue_messages():
 
 def update_queue_status(message_id, status, updated_at=None):
     """Mettre à jour statut"""
-    Queue.update(que_status=status, que_updated=updated_at or datetime.now()).where(
-        Queue.que_id == message_id
-    ).execute()
+    Queue.update(
+        que_status=status, que_updated=updated_at or datetime.datetime.now()
+    ).where(Queue.que_id == message_id).execute()
 
 
 def cleanup_old_queue_messages(sent_older_than_hours=24, failed_older_than_hours=168):
     """Nettoyage automatique"""
-    cutoff_sent = datetime.now() - datetime.timedelta(hours=sent_older_than_hours)
-    cutoff_failed = datetime.now() - datetime.timedelta(hours=failed_older_than_hours)
+    cutoff_sent = datetime.datetime.now() - datetime.timedelta(
+        hours=sent_older_than_hours
+    )
+    cutoff_failed = datetime.datetime.now() - datetime.timedelta(
+        hours=failed_older_than_hours
+    )
 
     # Supprimer messages envoyés anciens
     Queue.delete().where(

@@ -1,4 +1,6 @@
+import json
 import requests
+from datetime import datetime, date
 from core.component.logger import get_logger
 from core.component.config import config
 from core.component.authentication import generate_client_id
@@ -6,6 +8,19 @@ from core.component.authentication import generate_client_id
 logger = get_logger("api_publish")
 API_BASE_URL = config.get("api", "url", fallback="http://localhost:5000/api")
 _HEADERS = {"Content-Type": "application/json"}
+
+
+class _DateTimeEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, (set, frozenset)):
+            return list(obj)
+        return super().default(obj)
+
+
+def _serialize(payload: dict) -> str:
+    return json.dumps(payload, cls=_DateTimeEncoder)
 
 
 def _cid() -> str:
@@ -20,7 +35,10 @@ def add_processes(processes: list) -> bool:
             "processes": [p.__dict__ for p in processes],
         }
         r = requests.post(
-            f"{API_BASE_URL}/processes/add", json=payload, headers=_HEADERS, timeout=5
+            f"{API_BASE_URL}/processes/add",
+            data=_serialize(payload),
+            headers=_HEADERS,
+            timeout=5,
         )
         if r.status_code == 200:
             logger.info(f"✅ {len(processes)} processus envoyés")
@@ -41,7 +59,7 @@ def add_process_instances(instances: list) -> bool:
         }
         r = requests.post(
             f"{API_BASE_URL}/process_instances/add",
-            json=payload,
+            data=_serialize(payload),
             headers=_HEADERS,
             timeout=5,
         )
@@ -64,7 +82,7 @@ def add_process_events(events: list) -> bool:
         }
         r = requests.post(
             f"{API_BASE_URL}/process_events/add",
-            json=payload,
+            data=_serialize(payload),
             headers=_HEADERS,
             timeout=5,
         )

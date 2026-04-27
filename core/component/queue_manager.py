@@ -51,7 +51,7 @@ def add_notification(message_type: EQueueType, data: dict, priority: int = 5):
 
 
 def add_security_alert(process_name: str, score: int, details: dict = None):
-    """🚨 Helper pour alertes de sécurité"""
+    """🚨 Helper pour alertes de sécurité — ale_id doit être passé via data si déjà persisté"""
     data = {"process_name": process_name, "risk_score": score, "details": details or {}}
     add_notification(EQueueType.SECURITY_ALERT, data, priority=1)
 
@@ -62,7 +62,7 @@ def add_process_instance_created(instance_data: dict):
         "action": "instance_created",
         "instance": instance_data,
     }
-    add_notification(EQueueType.PROCESS_EVENT, data, priority=4)
+    add_notification(EQueueType.PROCESS_INSTANCE, data, priority=4)
 
 
 def add_process_event_started(instance_data: dict):
@@ -81,6 +81,15 @@ def add_process_event_stopped(instance_data: dict):
         "instance": instance_data,
     }
     add_notification(EQueueType.PROCESS_EVENT, data, priority=3)
+
+
+def add_process_detected(process_data: dict):
+    """🆕 Helper pour nouveau processus détecté (jamais vu)"""
+    data = {
+        "action": "process_detected",
+        "process": process_data,
+    }
+    add_notification(EQueueType.PROCESS, data, priority=4)
 
 
 def add_heartbeat(system_status: dict):

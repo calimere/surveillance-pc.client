@@ -362,16 +362,22 @@ class IntelligentQueueWorker(threading.Thread):
             topic = self._get_mqtt_topic(item)
             payload = self._format_mqtt_payload(item)
 
-            # Envoi avec timeout
-            result = publish(topic, payload, timeout=2)
+            # Envoi
+            result = publish(topic, payload)
 
             if result is not None:
                 # ✅ Succès MQTT
                 self._mqtt_success()
+                logger.info(
+                    f"📡 MQTT envoyé → topic={topic} | type={item.get('type')} | id={item.get('id')}"
+                )
                 return True
             else:
                 # ❌ Échec MQTT
                 self._mqtt_failure()
+                logger.warning(
+                    f"📡 MQTT échec → topic={topic} | type={item.get('type')} | id={item.get('id')}"
+                )
                 return False
 
         except Exception as e:
@@ -473,11 +479,15 @@ class IntelligentQueueWorker(threading.Thread):
             item_type = item.get("type", "unknown")
 
             # Classification intelligente
-            if item_type in ["security_alert", "critical_error", "process_blocked"]:
+            if item_type in ["security_alert"]:
                 group_key = "high_priority"
-            elif item_type in ["process_event", "process_update", "instance_add"]:
-                group_key = "process_data"
-            elif item_type in ["heartbeat", "status_update"]:
+            elif item_type in ["process_event"]:
+                group_key = "process_event"
+            elif item_type in ["process"]:
+                group_key = "process"
+            elif item_type in ["process_instance"]:
+                group_key = "process_instance"
+            elif item_type in ["heartbeat"]:
                 group_key = "heartbeat"
             elif item_type in ["notification"]:
                 group_key = "high_priority"
@@ -497,12 +507,19 @@ class IntelligentQueueWorker(threading.Thread):
                 topic = self._get_mqtt_topic(item)
                 payload = self._format_mqtt_payload(item)
 
-                if publish(topic, payload):
+                result = publish(topic, payload)
+                if result is not None:
+                    logger.info(
+                        f"📡 MQTT envoyé → topic={topic} | type={item.get('type')} | id={item.get('id')}"
+                    )
                     if item.get("id"):
                         self.processed_ids.add(item["id"])
                         if item.get("type") in self.persistent_types:
                             self._mark_message_sent(item["id"])
                 else:
+                    logger.warning(
+                        f"📡 MQTT échec (client non init) → type={item.get('type')} | id={item.get('id')}"
+                    )
                     # Retry individuel si échec
                     self._smart_retry(item)
 
@@ -515,11 +532,11 @@ class IntelligentQueueWorker(threading.Thread):
 
         topic_map = {
             "security_alert": "surveillance/[client]/alert",
-            "process_event": "surveillance/[client]/process",
-            "process_update": "surveillance/[client]/process",
+            "process_event": "surveillance/[client]/process/event",
+            "process": "surveillance/[client]/process",
+            "process_instance": "surveillance/[client]/process/instance",
             "notification": "surveillance/[client]/notification",
             "heartbeat": "surveillance/[client]/heartbeat",
-            "critical_error": "surveillance/[client]/error",
         }
 
         return topic_map.get(item_type, "surveillance/[client]/general")

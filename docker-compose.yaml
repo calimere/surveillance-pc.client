@@ -6,8 +6,8 @@ services:
     container_name: mosquitto-surveillance
     restart: unless-stopped
     ports:
-      - "1884:1883" # Port MQTT
-      - "9002:9001" # Port WebSocket (optionnel)
+      - "18883:1883" # Port MQTT
+      - "18884:1884" # Port MQTT
     volumes:
       - /mnt/mosquitto-surveillance/config:/mosquitto/config
       - /mnt/mosquitto-surveillance/data:/mosquitto/data

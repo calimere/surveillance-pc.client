@@ -158,3 +158,46 @@ def handle_surveillance_cmd(payload):
 def handle_surveillance_ack(payload):
     """Handler pour les accusés de réception (surveillance/[client]/ack)"""
     logger.debug(f"ACK reçu: {payload}")
+
+
+# ==================== HANDLERS SYNCHRONISATION BIDIRECTIONNELLE ====================
+
+def handle_server_changes(payload):
+    """Handler pour les changements serveur push via MQTT (surveillance/[client]/server_changes)"""
+    try:
+        if isinstance(payload, (bytes, bytearray)):
+            payload = payload.decode("utf-8")
+        payload_obj = json.loads(payload)
+        
+        logger.info(f"📨 Changements serveur reçus via MQTT: {len(payload_obj.get('changes', []))} items")
+        
+        # Déléguer au worker de sync bidirectionnelle
+        from core.component.bidirectional_sync_worker import get_bidirectional_sync_worker
+        worker = get_bidirectional_sync_worker()
+        worker._handle_server_push(payload_obj)
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur traitement changements serveur: {e}")
+
+
+def handle_sync_request(payload):
+    """Handler pour les demandes de sync serveur (surveillance/[client]/sync_request)"""
+    try:
+        if isinstance(payload, (bytes, bytearray)):
+            payload = payload.decode("utf-8")
+        payload_obj = json.loads(payload)
+        
+        logger.info(f"🔄 Demande de sync reçue: {payload_obj}")
+        
+        # Déléguer au worker de sync bidirectionnelle
+        from core.component.bidirectional_sync_worker import get_bidirectional_sync_worker
+        worker = get_bidirectional_sync_worker()
+        worker._handle_sync_request(payload_obj)
+        
+        # ACK pour confirmer réception
+        _ack(payload_obj, "ok", "Sync request processed")
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur demande sync serveur: {e}")
+        if 'payload_obj' in locals():
+            _ack(payload_obj, "error", f"Sync request failed: {str(e)}")

@@ -417,6 +417,8 @@ def is_weird_path(path: str):
         "\\start menu\\programs\\startup\\",
     ]
 
+    return any(k in p for k in keywords)
+
 
 def get_process_icon_base64(exe_path: str) -> str | None:
     """Extraire l'icône d'un exécutable et la retourner en base64 PNG.

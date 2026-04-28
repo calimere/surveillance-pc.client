@@ -294,9 +294,6 @@ def scan_running_processes():
                                 "prc_id": process.prc_id,
                                 "process_name": process.prc_name,
                                 "exe": process.prc_path,
-                                "icon_base64": get_process_icon_base64(
-                                    process.prc_path
-                                ),
                                 "timestamp": datetime.datetime.now().isoformat(),
                             }
                         )

@@ -130,13 +130,15 @@ class MemoryMonitor:
             "measurements": len(rss_values),
         }
 
-    def log_memory_report(self):
+    def log_memory_report(self, uptime_str=None):
         """📋 Log un rapport mémoire détaillé"""
         usage = self.get_current_usage()
         stats = self.get_memory_stats()
 
         if usage:
             logger.info("=== RAPPORT MÉMOIRE ===")
+            if uptime_str:
+                logger.info(f"⏱️ Uptime: {uptime_str}")
             logger.info(
                 f"💾 RAM actuelle: {usage['rss_mb']:.1f} MB ({usage['percent']:.1f}%)"
             )
@@ -170,6 +172,6 @@ def get_memory_usage():
     return memory_monitor.get_current_usage()
 
 
-def log_memory_report():
+def log_memory_report(uptime_str=None):
     """📋 Log rapport mémoire"""
-    memory_monitor.log_memory_report()
+    memory_monitor.log_memory_report(uptime_str)

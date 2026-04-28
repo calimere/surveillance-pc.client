@@ -12,7 +12,7 @@ from core.component.sync_worker import get_sync_worker, stop_sync_worker, get_sy
 from core.component.bidirectional_sync_worker import (
     get_bidirectional_sync_worker,
     stop_bidirectional_sync_worker,
-    get_bidirectional_sync_stats
+    get_bidirectional_sync_stats,
 )
 from core.business.db import init_db
 from core.business.running_processes import (
@@ -28,7 +28,7 @@ from core.business.mqtt_handlers import (
     handle_surveillance_cmd,
     handle_surveillance_ack,
     handle_server_changes,
-    handle_sync_request
+    handle_sync_request,
 )
 from core.component.logger import get_logger
 from core.component.memory_monitor import (
@@ -64,7 +64,7 @@ if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
     init_mqtt()  # initialize mqtt client
     subscribe("surveillance/[client]/cmd", handle_surveillance_cmd)
     subscribe("surveillance/[client]/ack", handle_surveillance_ack)
-    
+
     # Abonnements pour synchronisation bidirectionnelle
     subscribe("surveillance/[client]/server_changes", handle_server_changes)
     subscribe("surveillance/[client]/sync_request", handle_sync_request)
@@ -94,7 +94,9 @@ bidirectional_sync_interval = config.getint(
 )  # 10 minutes par défaut
 bidirectional_sync_worker = get_bidirectional_sync_worker(bidirectional_sync_interval)
 bidirectional_sync_worker.start()
-logger.info(f"🔄 Sync Bidirectionnel activé avec intervalle de {bidirectional_sync_interval}s")
+logger.info(
+    f"🔄 Sync Bidirectionnel activé avec intervalle de {bidirectional_sync_interval}s"
+)
 
 # 🧠 Démarrage du monitoring mémoire
 start_memory_monitoring()
@@ -102,6 +104,7 @@ logger.info("Monitoring mémoire activé")
 
 # main loop
 
+start_time = time.time()
 add_heartbeat(
     {
         "cpu_usage": psutil.cpu_percent(interval=None),
@@ -112,7 +115,9 @@ add_heartbeat(
 try:
     loop_count = 0
     while True:
-        publish("surveillance/[client]/uptime")
+        uptime_seconds = int(time.time() - start_time)
+        uptime_str = f"{uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m {uptime_seconds % 60}s"
+        publish("surveillance/[client]/uptime", uptime_str)
         scan_running_processes()
         time.sleep(0.1)
         populate_instances()
@@ -136,7 +141,9 @@ try:
 
         # 📊 Rapport mémoire et sync périodique (toutes les 100 boucles, ~10 minutes)
         if loop_count % 100 == 0:
-            log_memory_report()
+            uptime_seconds = int(time.time() - start_time)
+            uptime_str = f"{uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m {uptime_seconds % 60}s"
+            log_memory_report(uptime_str)
 
             # 💓 Heartbeat système
             add_heartbeat(
@@ -152,7 +159,7 @@ try:
                 logger.info(
                     f"📊 Sync stats: {sync_stats['total_synced']} synced, {sync_stats['unsync_records']} pending"
                 )
-            
+
             # 📊 Statistiques sync bidirectionnel
             bidirectional_stats = get_bidirectional_sync_stats()
             if bidirectional_stats.get("is_running"):

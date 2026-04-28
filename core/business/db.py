@@ -138,12 +138,13 @@ class SecurityAlert(BaseModel):
 
 class SyncMetadata(BaseModel):
     """Table pour stocker les métadonnées de synchronisation bidirectionnelle"""
+
     smd_id = AutoField(primary_key=True)
     smd_key = TextField(unique=True)  # ex: "last_server_sync_timestamp"
     smd_value = TextField()  # Valeur sérialisée (JSON/string/timestamp)
     smd_created = DateTimeField(default=datetime.datetime.now)
     smd_updated = DateTimeField(default=datetime.datetime.now)
-    
+
     class Meta:
         table_name = "sync_metadata"
 
@@ -168,7 +169,15 @@ def init_db():
     db.init(get_db_path())
     db.connect()
     db.create_tables(
-        [Process, ProcessInstance, ProcessEvent, Config, Queue, SecurityAlert, SyncMetadata]
+        [
+            Process,
+            ProcessInstance,
+            ProcessEvent,
+            Config,
+            Queue,
+            SecurityAlert,
+            SyncMetadata,
+        ]
     )
     # Ne pas fermer la connexion ici - elle sera réutilisée
 
@@ -513,7 +522,7 @@ def get_running_instances():
     )
 
 
-def get_recent_process_instances(hours=24):
+def get_recent_process_instances(hours=2):
     db.init(get_db_path())
     cutoff_time = datetime.datetime.now() - datetime.timedelta(hours=hours)
     return list(

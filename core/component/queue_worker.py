@@ -14,6 +14,7 @@ from core.business.db import cleanup_old_queue_messages
 from core.component.mqtt_client import publish
 from core.component.mqtt_client import get_mqtt_status, MQTTStatus
 from core.component.mqtt_client import ping
+from core.component.authentication import generate_client_id
 
 """
 🎯 Priorités dynamiques : Alertes de sécurité en premier
@@ -43,6 +44,7 @@ class IntelligentQueueWorker(threading.Thread):
         # Traçabilité des messages
         self.persistent_types = ["security_alert", "critical_error", "process_blocked"]
         self.processed_ids = set()  # Cache des IDs traités
+        self._queued_ids = set()  # IDs déjà en queue mémoire (anti-doublon)
         self._sequence_counter = 0  # Pour éviter les comparaisons de dict
 
         # 🛡️ Circuit breaker MQTT
@@ -259,12 +261,11 @@ class IntelligentQueueWorker(threading.Thread):
             pending_messages = get_pending_queue_messages()
 
             for msg in pending_messages:
-                # Éviter les doublons
-                if msg["id"] not in self.processed_ids:
-                    # Marquer comme en cours de traitement
-                    self._mark_message_processing(msg["id"])
-
-                    # Remettre en queue mémoire avec priorité adaptée
+                msg_id = msg["id"]
+                # Éviter les doublons : ni déjà traité, ni déjà en queue mémoire
+                if msg_id not in self.processed_ids and msg_id not in self._queued_ids:
+                    self._mark_message_processing(msg_id)
+                    self._queued_ids.add(msg_id)
                     self._sequence_counter += 1
                     self.queue.put(
                         (msg["priority"], self._sequence_counter, msg["data"])
@@ -324,6 +325,7 @@ class IntelligentQueueWorker(threading.Thread):
         """✅ Marquer message comme envoyé"""
         try:
             update_queue_status(message_id, "sent", datetime.now())
+            self._queued_ids.discard(message_id)
         except Exception as e:
             logger.error(f"Failed to mark sent {message_id}: {e}")
 
@@ -331,6 +333,7 @@ class IntelligentQueueWorker(threading.Thread):
         """❌ Marquer message comme échoué"""
         try:
             update_queue_status(message_id, "failed", datetime.now())
+            self._queued_ids.discard(message_id)
         except Exception as e:
             logger.error(f"Failed to mark failed {message_id}: {e}")
 
@@ -346,6 +349,8 @@ class IntelligentQueueWorker(threading.Thread):
             # Nettoyer le cache local
             if len(self.processed_ids) > 1000:
                 self.processed_ids.clear()
+            if len(self._queued_ids) > 500:
+                self._queued_ids.clear()
 
         except Exception as e:
             logger.error(f"Cleanup failed: {e}")
@@ -529,23 +534,23 @@ class IntelligentQueueWorker(threading.Thread):
     def _get_mqtt_topic(self, item):
         """🎯 Construire topic MQTT selon le type"""
         item_type = item.get("type", "general")
+        cid = generate_client_id()
 
         topic_map = {
-            "security_alert": "surveillance/[client]/alert",
-            "process_event": "surveillance/[client]/process/event",
-            "process": "surveillance/[client]/process",
-            "process_instance": "surveillance/[client]/process/instance",
-            "notification": "surveillance/[client]/notification",
-            "heartbeat": "surveillance/[client]/heartbeat",
+            "security_alert": f"surveillance/{cid}/alert",
+            "process_event": f"surveillance/{cid}/process/event",
+            "process": f"surveillance/{cid}/process",
+            "process_instance": f"surveillance/{cid}/process/instance",
+            "notification": f"surveillance/{cid}/notification",
+            "heartbeat": f"surveillance/{cid}/heartbeat",
         }
 
-        return topic_map.get(item_type, "surveillance/[client]/general")
+        return topic_map.get(item_type, f"surveillance/{cid}/general")
 
     def _format_mqtt_payload(self, item):
         """📝 Formatter payload MQTT"""
         return {
-            "id": item.get("id"),
-            "type": item.get("type"),
+            "message_id": item.get("id"),
             "timestamp": item.get("created_at", datetime.now().isoformat()),
             "data": {
                 k: v for k, v in item.items() if k not in ["id", "type", "created_at"]

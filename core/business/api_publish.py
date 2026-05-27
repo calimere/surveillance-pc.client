@@ -12,19 +12,6 @@ API_BASE_URL = config.get("api", "url", fallback="http://localhost:5000/api")
 _HEADERS = {"Content-Type": "application/json"}
 
 
-class _DateTimeEncoder(json.JSONEncoder):
-    def default(self, obj):
-        if isinstance(obj, (datetime, date)):
-            return obj.isoformat()
-        if isinstance(obj, (set, frozenset)):
-            return list(obj)
-        return super().default(obj)
-
-
-def _serialize(payload: dict) -> str:
-    return json.dumps(payload, cls=_DateTimeEncoder)
-
-
 def _cid() -> str:
     return generate_client_id()
 
@@ -35,7 +22,7 @@ def _generate_dedup_hash(client_id: str, local_id: int, obj_type: str) -> str:
     return hashlib.md5(content.encode()).hexdigest()[:16]
 
 
-def _serialize(obj: dict) -> dict:
+def _serialize_object_data(obj: dict) -> dict:
     """Convertit les objets datetime en chaînes ISO pour la sérialisation JSON.
     S'assure que l'ID local SQLite est préservé pour éviter les doublons côté serveur."""
     result = {}
@@ -66,7 +53,7 @@ def add_processes(processes: list) -> bool:
         serialized_processes = []
         
         for p in processes:
-            data = _serialize(p.__data__)
+            data = _serialize_object_data(p.__data__)
             # Ajouter hash de déduplication
             if 'id' in data:
                 data['dedup_hash'] = _generate_dedup_hash(client_id, data['id'], 'process')
@@ -78,7 +65,7 @@ def add_processes(processes: list) -> bool:
         }
         r = requests.post(
             f"{API_BASE_URL}/processes/add",
-            data=_serialize(payload),
+            json=payload,
             headers=_HEADERS,
             timeout=5,
         )
@@ -104,7 +91,7 @@ def add_process_instances(instances: list) -> bool:
         serialized_instances = []
         
         for i in instances:
-            data = _serialize(i.__data__)
+            data = _serialize_object_data(i.__data__)
             # Ajouter hash de déduplication
             if 'id' in data:
                 data['dedup_hash'] = _generate_dedup_hash(client_id, data['id'], 'instance')
@@ -116,7 +103,7 @@ def add_process_instances(instances: list) -> bool:
         }
         r = requests.post(
             f"{API_BASE_URL}/process_instances/add",
-            data=_serialize(payload),
+            json=payload,
             headers=_HEADERS,
             timeout=5,
         )
@@ -142,7 +129,7 @@ def add_process_events(events: list) -> bool:
         serialized_events = []
         
         for e in events:
-            data = _serialize(e.__data__)
+            data = _serialize_object_data(e.__data__)
             # Ajouter hash de déduplication
             if 'id' in data:
                 data['dedup_hash'] = _generate_dedup_hash(client_id, data['id'], 'event')
@@ -154,14 +141,15 @@ def add_process_events(events: list) -> bool:
         }
         r = requests.post(
             f"{API_BASE_URL}/process_events/add",
-            data=_serialize(payload),
+            json=payload,
             headers=_HEADERS,
             timeout=5,
         )
         if r.status_code == 200:
             logger.info(f"✅ {len(events)} événements envoyés (anti-duplication)")
             return True
-        logger.warning(f"⚠️ /process_events/add → HTTP {r.status_code}")
+        
+        logger.warning(f"⚠️ /process_events/add → HTTP {r.status_code} | Body: {r.text}")
         return False
     except Exception as e:
         logger.error(f"❌ add_process_events: {e}")
@@ -180,7 +168,7 @@ def add_security_alerts(alerts: list) -> bool:
         serialized_alerts = []
         
         for a in alerts:
-            data = _serialize(a.__data__)
+            data = _serialize_object_data(a.__data__)
             # Ajouter hash de déduplication
             if 'id' in data:
                 data['dedup_hash'] = _generate_dedup_hash(client_id, data['id'], 'alert')

@@ -25,6 +25,7 @@ def init_authentication():
 
 
 def authenticate_client():
+    
     pass
 
 

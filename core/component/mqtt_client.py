@@ -19,6 +19,7 @@ mqtt_keepalive = config.getint("mqtt", "keepalive", fallback=60)
 _client = None
 _handlers = {}  # Dictionnaire topic -> fonction callback
 
+logger.info(f"Config MQTT utilisée: host={mqtt_host}, port={mqtt_port}, user={mqtt_user}, keepalive={mqtt_keepalive}")
 
 def ping():
     """Vérifie la connectivité MQTT"""

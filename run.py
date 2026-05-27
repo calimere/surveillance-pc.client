@@ -1,7 +1,9 @@
 import time
 import psutil
+import platform
 
 # from core.authentication import init_authentication
+from core.component.authentication import init_authentication
 from core.component.queue_manager import (
     get_queue_worker,
     stop_queue_worker,
@@ -40,6 +42,68 @@ from core.component.memory_optimizer import MemoryOptimizer
 
 logger = get_logger("main")
 
+
+def get_windows_info() -> dict:
+    """Récupère les informations sur la version de Windows et la build"""
+    try:
+        # Informations de base via platform
+        system_info = {
+            "os_name": platform.system(),
+            "os_version": platform.version(),
+            "os_release": platform.release(),
+            "architecture": platform.architecture()[0],
+            "machine": platform.machine(),
+            "processor": platform.processor(),
+        }
+        
+        # Informations Windows spécifiques
+        if platform.system() == "Windows":
+            try:
+                import winreg
+                # Récupérer des informations plus détaillées depuis le registre Windows
+                key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, 
+                                   r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+                
+                try:
+                    system_info["windows_version"] = winreg.QueryValueEx(key, "ProductName")[0]
+                except FileNotFoundError:
+                    pass
+                
+                try:
+                    system_info["windows_build"] = winreg.QueryValueEx(key, "CurrentBuild")[0]
+                except FileNotFoundError:
+                    pass
+                
+                try:
+                    system_info["windows_build_number"] = winreg.QueryValueEx(key, "CurrentBuildNumber")[0]
+                except FileNotFoundError:
+                    pass
+                
+                try:
+                    system_info["windows_display_version"] = winreg.QueryValueEx(key, "DisplayVersion")[0]
+                except FileNotFoundError:
+                    pass
+                
+                try:
+                    system_info["windows_edition"] = winreg.QueryValueEx(key, "EditionID")[0]
+                except FileNotFoundError:
+                    pass
+                    
+                winreg.CloseKey(key)
+            except Exception as e:
+                logger.warning(f"⚠️ Impossible de récupérer les infos Windows détaillées: {e}")
+        
+        return system_info
+        
+    except Exception as e:
+        logger.error(f"❌ Erreur récupération infos système: {e}")
+        return {
+            "os_name": "Unknown",
+            "os_version": "Unknown",
+            "error": str(e)
+        }
+
+
 logger.info("Démarrage de la surveillance des exécutables...")
 send_discord_notification(
     f"Démarrage de la surveillance des exécutables sur le pc {get_pc_alias()}..."
@@ -48,16 +112,17 @@ init_db()
 
 # ------------- mise en attente de l'authentification client -------------
 # # authenticate client and get token
+
 # token = None
 # while token is None:
 #     # authenticate client and register if needed
 #     token = init_authentication()
 #     if not token:
-#         print("Le client n'a pas pu être authentifié. Veuillez approuver ce client dans le panneau d'administration.")
+#         logger.warning("Le client n'a pas pu être authentifié. Veuillez approuver ce client dans le panneau d'administration.")
 #         time.sleep(30)
 
 # # once authenticated
-# print("Client authentifié avec succès.")
+# logger.info("Client authentifié avec succès.")
 
 
 if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
@@ -105,12 +170,17 @@ logger.info("Monitoring mémoire activé")
 # main loop
 
 start_time = time.time()
-add_heartbeat(
-    {
-        "cpu_usage": psutil.cpu_percent(interval=None),
-        "memory_usage": psutil.virtual_memory().percent,
-    }
-)
+
+# 💓 Heartbeat de démarrage avec informations système complètes
+startup_heartbeat_data = {
+    "cpu_usage": psutil.cpu_percent(interval=None),
+    "memory_usage": psutil.virtual_memory().percent,
+    "startup": True,  # Indicateur que c'est le heartbeat de démarrage
+    **get_windows_info()  # Fusion des informations Windows
+}
+
+logger.info("📊 Envoi heartbeat de démarrage avec informations système Windows")
+add_heartbeat(startup_heartbeat_data)
 
 try:
     loop_count = 0

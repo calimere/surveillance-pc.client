@@ -1,3 +1,4 @@
+from urllib import request
 import uuid
 from core.component.config import get_api_url, get_db_path, get_pc_alias
 import sqlite3
@@ -25,7 +26,55 @@ def init_authentication():
 
 
 def authenticate_client():
-    
+
+    # request api
+    post_data = {"client_id": get_client_id()}
+    challenge = request.post(get_api_url() + "/device/challenge", json=post_data)
+
+    if challenge.status_code == 200:
+        challenge_data = challenge.json()
+        # sign the challenge with the private key
+        signature = sign_challenge(challenge_data["challenge"])
+        # send the signature to the api
+        post_data = {
+            "client_id": get_client_id(),
+            "signature": signature,
+            "challenge_id": challenge_data["challenge_id"],
+        }
+        response = request.post(get_api_url() + "/device/authenticate", json=post_data)
+
+        if response.status_code == 200:
+            response_data = response.json()
+            return response_data["token"]
+        else:
+            return None
+    if challenge.status_code == 404:
+        # client not registered, need to register
+        return None
+
+    pass
+
+
+def sign_challenge(challenge):
+    # TO-DO: implement signing of the challenge with the private key
+    pass
+
+
+def get_private_key():
+
+    conn = sqlite3.connect(get_db_path())
+    cur = conn.cursor()
+
+    cur.execute("SELECT cfg_value FROM config WHERE cfg_key='private_key'")
+    row = cur.fetchone()
+
+    conn.close()
+
+    if row:
+        return row[0]
+    else:
+        return None
+
     pass
 
 

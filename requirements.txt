@@ -8,3 +8,4 @@ configparser
 peewee
 wmi
 pefilePillow
+cryptography

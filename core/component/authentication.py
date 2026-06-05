@@ -4,6 +4,10 @@ from core.component.config import get_api_url, get_db_path, get_pc_alias
 import sqlite3
 
 from core.business.db import add_or_update_config
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 
 
 # je récupère le token du client dans la db locale
@@ -45,20 +49,50 @@ def authenticate_client():
 
         if response.status_code == 200:
             response_data = response.json()
+            set_client_token(response_data["token"])
             return response_data["token"]
         else:
             return None
     if challenge.status_code == 404:
         # client not registered, need to register
-        return None
 
-    pass
+        private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+        set_private_key(private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption()
+        ))
+
+        public_key = private_key.public_key()
+
+        register_data = {
+            "client_id": get_client_id(),
+            "public_key": public_key.public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            ).decode(),
+        }
+
+        response = request.post(get_api_url() + "/device/register", json=register_data)
+        if response.status_code == 200:
+            return authenticate_client()
+
+    return None
+
 
 
 def sign_challenge(challenge):
-    # TO-DO: implement signing of the challenge with the private key
-    pass
+    private_key = get_private_key()
+    return private_key.sign(
+        challenge.encode(),
+        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+        hashes.SHA256(),
+    )
 
+
+def set_private_key(private_key):
+    add_or_update_config("private_key", private_key)
 
 def get_private_key():
 

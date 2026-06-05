@@ -110,21 +110,19 @@ send_discord_notification(
 )
 init_db()
 
-# ------------- mise en attente de l'authentification client -------------
-# # authenticate client and get token
+# authenticate client and get token
+token = None
+while token is None:
+    # authenticate client and register if needed
+    token = init_authentication()
+    if not token:
+        logger.warning("Le client n'a pas pu être authentifié. Veuillez approuver ce client dans le panneau d'administration.")
+        time.sleep(30)
 
-# token = None
-# while token is None:
-#     # authenticate client and register if needed
-#     token = init_authentication()
-#     if not token:
-#         logger.warning("Le client n'a pas pu être authentifié. Veuillez approuver ce client dans le panneau d'administration.")
-#         time.sleep(30)
+# once authenticated
+logger.info("Client authentifié avec succès.")
 
-# # once authenticated
-# logger.info("Client authentifié avec succès.")
-
-
+# activation de MQTT si configuré
 if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
     init_mqtt()  # initialize mqtt client
     subscribe("surveillance/[client]/cmd", handle_surveillance_cmd)
@@ -134,13 +132,6 @@ if config.getint("settings", "mqtt_enabled", fallback=500) == 1:
     subscribe("surveillance/[client]/server_changes", handle_server_changes)
     subscribe("surveillance/[client]/sync_request", handle_sync_request)
     logger.info("📡 MQTT topics sync bidirectionnel configurés")
-
-# faire la synchro des exe avec le serveur distant
-# stocker la dernière date de synchro sur le serveur distant
-# ajouter une vérification de synchro et récupérer la sauvegarde depuis le serveur distant si besoin
-# ajouter la possibilité de fermer un processus à distance via mqtt
-# ajouter la possibilité de lancer un processus à distance via mqtt
-# vérifier régulièrement si mqtt est disponible et republier les messages en attente dans la queue via API
 
 # 🚀 Démarrage des workers asynchrones
 queue_worker = get_queue_worker()  # Worker pour notifications temps réel
@@ -168,7 +159,6 @@ start_memory_monitoring()
 logger.info("Monitoring mémoire activé")
 
 # main loop
-
 start_time = time.time()
 
 # 💓 Heartbeat de démarrage avec informations système complètes
@@ -182,6 +172,7 @@ startup_heartbeat_data = {
 logger.info("📊 Envoi heartbeat de démarrage avec informations système Windows")
 add_heartbeat(startup_heartbeat_data)
 
+# démarrage de la boucle principale de surveillance
 try:
     loop_count = 0
     while True:

@@ -1,5 +1,7 @@
 from urllib import request
 import uuid
+
+import requests
 from core.component.config import get_api_url, get_db_path, get_pc_alias
 import sqlite3
 
@@ -33,7 +35,7 @@ def authenticate_client():
 
     # request api
     post_data = {"client_id": get_client_id()}
-    challenge = request.post(get_api_url() + "/device/challenge", json=post_data)
+    challenge = requests.post(get_api_url() + "/device/challenge", json=post_data)
 
     if challenge.status_code == 200:
         challenge_data = challenge.json()
@@ -45,7 +47,7 @@ def authenticate_client():
             "signature": signature,
             "challenge_id": challenge_data["challenge_id"],
         }
-        response = request.post(get_api_url() + "/device/authenticate", json=post_data)
+        response = requests.post(get_api_url() + "/device/authenticate", json=post_data)
 
         if response.status_code == 200:
             response_data = response.json()
@@ -58,11 +60,13 @@ def authenticate_client():
 
         private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 
-        set_private_key(private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption()
-        ))
+        set_private_key(
+            private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
 
         public_key = private_key.public_key()
 
@@ -74,25 +78,27 @@ def authenticate_client():
             ).decode(),
         }
 
-        response = request.post(get_api_url() + "/device/register", json=register_data)
+        response = requests.post(get_api_url() + "/device/register", json=register_data)
         if response.status_code == 200:
             return authenticate_client()
 
     return None
 
 
-
 def sign_challenge(challenge):
     private_key = get_private_key()
     return private_key.sign(
         challenge.encode(),
-        padding.PSS(mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH),
+        padding.PSS(
+            mgf=padding.MGF1(hashes.SHA256()), salt_length=padding.PSS.MAX_LENGTH
+        ),
         hashes.SHA256(),
     )
 
 
 def set_private_key(private_key):
     add_or_update_config("private_key", private_key)
+
 
 def get_private_key():
 

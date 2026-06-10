@@ -72,6 +72,10 @@ def authenticate_client():
 
         register_data = {
             "client_id": get_client_id(),
+            "firmware_version": get_firmware_version(),
+            "name": get_pc_alias(),
+            "os": get_os_info(),
+            "os_build": get_os_version(),
             "public_key": public_key.public_bytes(
                 encoding=serialization.Encoding.PEM,
                 format=serialization.PublicFormat.SubjectPublicKeyInfo,
